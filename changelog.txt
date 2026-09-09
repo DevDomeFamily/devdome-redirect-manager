@@ -1,0 +1,34 @@
+== Changelog (older releases) ==
+
+= 1.2.3 =
+* Readme copy polish and expanded External services disclosure.
+
+= 1.2.2 =
+* WordPress.org release housekeeping: removed the internal file logger; the self-hosted suite updater is excluded from this build so updates come from WordPress.org only.
+
+= 1.2.1 =
+* Fixed: redirect statistics now count unique visitors, so a visitor bouncing back through the same rule repeatedly no longer inflates the counts, and redirect pages no longer double-count pageviews when DevDome Analytics is installed.
+
+= 1.1.9 =
+* Fixed: the "Send To Bypass Link" redirect now sends the same no-referrer policy as every other redirect method.
+
+= 1.1.8 =
+* Server-side redirects (301/302/307/308 and Meta Refresh) now send a `Referrer-Policy: no-referrer` header so the redirecting page is not exposed to the destination.
+
+= 1.1.7 =
+* Fixed: "same path on another domain" redirects strip the plugin's internal query parameters from the inherited query string so they never reach the destination URL.
+
+= 1.1.6 =
+* Introduced the Free and Pro split: Free includes up to 5 redirect rules; geo targeting, device targeting and scheduling are Pro features.
+
+= 1.1.5 =
+* Fixed: full-URL and bare-domain matches now ignore a leading `www.`, so a www / non-www difference no longer stops a redirect.
+* Fixed: Custom URLs / Selected pages now match correctly on WordPress installs in a subdirectory.
+* Fixed: "Once per visitor" now reliably redirects a visitor only once (it was redirecting on every visit).
+* Fixed: link rotation (sequential/random) is now tracked per rule, so rules that share a visitor no longer interfere with each other.
+* Fixed: with the geo "redirect all except listed countries" mode, a visitor whose country cannot be resolved is no longer redirected (fails safe).
+* Fixed: new-tab opening with an after-click delay is no longer blocked by the browser pop-up blocker.
+* Fixed: "Reset Stats" now also restarts the rule's rotation position.
+* Improved: more accurate unique-visitor and redirect counting behind shared IP addresses.
+* Improved: bounded internal visitor history and switched the settings store to an upsert to avoid growth and write contention under traffic.
+* Hardened: rule Run/Stop now requires a valid security token, the bypass URL is validated, and activation no longer clears the plugin's own saved options.

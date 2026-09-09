@@ -1,0 +1,58 @@
+/* DevDome Redirect Manager - admin screen styles.
+   Extracted from the settings page so no <style> block is written into the markup
+   (WordPress.org: use wp_enqueue_style). Loaded only on the plugin's own screen. */
+
+/* Selected-URL picker, chip lists and the click-distribution slider */
+.dd-pick-tab{padding:5px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;font-weight:600;color:#4b5563;cursor:pointer;}
+.dd-pick-tab.is-active{background:#4f46e5;border-color:#4f46e5;color:#fff;}
+#dd-pick-results{padding:0 !important;}
+#dd-pick-results .dd-dd-opt{display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer;height:48px;box-sizing:border-box;padding:6px 12px;}
+.dd-pick-add{color:#4f46e5;font-weight:600;font-size:12px;white-space:nowrap;}
+#dd-pick-results .dd-dd-opt.is-chosen{background:#ecfdf5;color:#065f46;}
+#dd-pick-results .dd-dd-opt.is-chosen .dd-pick-add{color:#059669;}
+#dd-pick-results .dd-pick-empty{padding:10px 12px;color:#6b7280;font-size:13px;}
+#dd-pick-results .dd-pick-head{display:flex;justify-content:space-between;align-items:center;gap:10px;height:34px;box-sizing:border-box;padding:6px 12px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#fff;font-size:12px;font-weight:600;color:#6b7280;z-index:1;}
+#dd-pick-results .dd-pick-close{cursor:pointer;color:#6b7280;font-weight:700;font-size:18px;line-height:1;}
+#dd-pick-results .dd-pick-close:hover{color:#111827;}
+#dd-pick-results .dd-hl{background:#fde68a;color:inherit;border-radius:2px;font-weight:700;}
+#dd-pick-selected,#dd-custom-selected,#dd-prov-selected{max-height:400px;overflow-y:auto;}
+.dd-sel-group{margin-top:12px;}
+.dd-sel-head{font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;}
+.dd-sel-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;margin-bottom:4px;font-size:13px;color:#374151;word-break:break-all;}
+.dd-sel-hits{color:#6b7280;font-size:12px;font-weight:600;white-space:nowrap;}
+.dd-sel-hits-num{color:#4f46e5;font-weight:700;}
+.dd-sel-x{cursor:pointer;color:#ef4444;font-weight:600;font-size:12px;flex-shrink:0;padding:3px 10px;border:1px solid #fecaca;border-radius:6px;background:#fff;line-height:1.2;}
+.dd-sel-x:hover{background:#fef2f2;border-color:#fca5a5;}
+.dd-sel-drag{cursor:grab;color:#9ca3af;flex-shrink:0;font-size:16px;width:16px;height:16px;line-height:16px;}
+.dd-sel-drag:active{cursor:grabbing;}
+.dd-sel-pri{flex-shrink:0;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:9999px;padding:1px 8px;font-size:11px;font-weight:700;}
+/* Click-distribution spread slider (modern) */
+.dd-spread{width:100%;max-width:720px;}
+.dd-spread-ends{display:flex;justify-content:space-between;font-size:11px;font-weight:600;color:#6b7280;margin-bottom:8px;}
+.dd-spread-ends span:nth-child(2){color:#9ca3af;}
+.dd-spread-track{position:relative;display:flex;align-items:center;height:22px;}
+.dd-spread-tick{position:absolute;top:50%;width:2px;height:10px;margin-top:-5px;background:#d1d5db;border-radius:1px;transform:translateX(-50%);pointer-events:none;}
+.dd-spread-track input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:9999px;background:linear-gradient(90deg,#c7d2fe,#4f46e5);outline:none;margin:0;cursor:pointer;}
+.dd-spread-track input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:18px;height:18px;border-radius:50%;background:#fff;border:2px solid #4f46e5;box-shadow:0 1px 3px rgba(0,0,0,.2);cursor:grab;transition:transform .1s;}
+.dd-spread-track input[type=range]::-webkit-slider-thumb:active{cursor:grabbing;transform:scale(1.1);}
+.dd-spread-track input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:#fff;border:2px solid #4f46e5;box-shadow:0 1px 3px rgba(0,0,0,.2);cursor:grab;}
+.dd-sel-nth{display:inline-flex;align-items:center;gap:5px;color:#6b7280;font-size:12px;font-weight:600;white-space:nowrap;}
+.dd-sel-nth input{width:52px;height:28px;padding:2px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;text-align:center;}
+#dd-custom-add,.dd-list-addbtn{padding:0 16px;height:38px;border:0;border-radius:8px;background:#4f46e5;color:#fff;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;}
+#dd-custom-add:hover,.dd-list-addbtn:hover{background:#4338ca;}
+#dd-transit-selected{margin-top:10px;}
+.dd-sel-edit{cursor:pointer;color:#4f46e5;font-weight:600;font-size:12px;flex-shrink:0;padding:3px 10px;border:1px solid #c7d2fe;border-radius:6px;background:#fff;line-height:1.2;}
+.dd-sel-edit:hover{background:#eef2ff;}
+.dd-removeall{margin-top:8px;font-size:12px;}
+.dd-removeall-btn{cursor:pointer;color:#ef4444;font-weight:600;font-size:12px;padding:3px 10px;border:1px solid #fecaca;border-radius:6px;background:#fff;line-height:1.2;}
+.dd-removeall-btn:hover{background:#fef2f2;border-color:#fca5a5;}
+.dd-removeall-confirm{color:#6b7280;font-weight:600;}
+.dd-removeall-confirm a{cursor:pointer;text-decoration:underline;}
+.dd-removeall-confirm .yes{color:#ef4444;}
+.dd-removeall-confirm .no{color:#6b7280;}
+
+/* Country picker (geo filter) */
+#geo_country_list .dd-geo-opt{display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer;height:42px;box-sizing:border-box;padding:6px 12px;font-size:13px;color:#374151;}
+#geo_country_list .dd-geo-opt:hover{background:#f3f4f6;}
+#geo_country_list .dd-geo-add{color:#4f46e5;font-weight:600;font-size:12px;white-space:nowrap;}
+#geo_country_list .dd-geo-empty{padding:10px 12px;color:#6b7280;font-size:13px;}
