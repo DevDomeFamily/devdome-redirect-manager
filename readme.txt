@@ -4,7 +4,7 @@ Tags: redirect, redirects, link rotator, geotargeting, 301 redirect
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.3.4
+Stable tag: 1.3.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -158,7 +158,19 @@ One file is generated: `assets/devdome-tools-tw.css`, the admin screen's utility
 
 Those two build inputs are not included in the distributed package. Ask for them at https://devdome.com/contact and we will send them.
 
+== Screenshots ==
+
+1. DevDome Redirect Manager rules: several WordPress redirect rules side by side, each with its own priority, nickname and redirect statistics.
+2. Redirect setup: entire site, selected URLs, custom URLs or all 404 pages; 301, 302, 307, 308, JavaScript or meta refresh; destination list, link rotation order and redirect frequency.
+3. Geo targeting: redirect only visitors from listed countries, or everyone except them.
+4. Device targeting and optional settings: desktop, mobile, tablet; purge page cache on save; fallback for visitors not redirected.
+5. Scheduling: run a redirect rule between dates and times in your timezone.
+
 == Changelog ==
+
+= 1.3.5 =
+* Settings: every option now shows a one line hint under the control, with the info icon holding the full explanation, the same layout as DevDome Malware Scanner.
+* DevDome Dashboard: installing another DevDome plugin from the dashboard no longer activates it, you activate it yourself from its card. Output escaping tightened.
 
 = 1.3.4 =
 * DevDome Dashboard: plugin list, descriptions, logos and versions now come from devdome.com, one-click install of DevDome plugins from WordPress.org, Docs link and Fix buttons, Activate stays on the dashboard.

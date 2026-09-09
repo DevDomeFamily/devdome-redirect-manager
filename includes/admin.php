@@ -2056,9 +2056,7 @@ function devdredi_settings_page()
                 </tr>
 
                 <tr id="dd-row-pagelinks"<?php echo ($redirect_source === 'found') ? '' : ' style="display:none;"'; ?>>
-                    <th>Find Links/Buttons Containing
-                        <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Enter a domain (e.g. amazon.com or ebay.com). Only external links/buttons pointing to that domain are used — internal links on your own site are ignored.</span></span>
-                    </th>
+                    <th>Find Links/Buttons Containing</th>
                     <td>
                         <div style="display:flex; gap:8px; align-items:flex-start;">
                             <textarea id="dd-plc-input" rows="3" class="dd-textarea" placeholder="e.g. amazon.com or ebay.com — one per line" autocomplete="off" style="flex:1;"></textarea>
@@ -2071,14 +2069,14 @@ function devdredi_settings_page()
                             <span class="dd-removeall-confirm" data-act="confirm" style="display:none;">Remove all? <a class="yes" data-act="yes">Yes</a> / <a class="no" data-act="no">No</a></span>
                         </div>
                         <textarea name="page_links_contains" id="dd-plc-store" style="display:none;"><?php echo esc_textarea(devdredi_get_setting('page_links_contains', '')); ?></textarea>
+                        <p class="dd-hint">A domain such as amazon.com. Only links pointing there are used. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Enter a domain (e.g. amazon.com or ebay.com). Only external links/buttons pointing to that domain are used — internal links on your own site are ignored.</span></span></p>
                     </td>
                 </tr>
 
                 <tr id="dd-row-linkorder"<?php echo ($redirect_source === 'provided') ? '' : ' style="display:none;"'; ?>>
                     <th>
                         Link Order
-                        <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Choose how destination URLs are used when this rule has more than one URL.</span></span>
-                    </th>
+                        </th>
                     <td>
                         <?php
                         $lm_labels = array('sequential' => 'First to last', 'random' => 'Random', 'descending' => 'Weighted distribution');
@@ -2114,18 +2112,19 @@ function devdredi_settings_page()
                             <input type="hidden" name="descending_seed" id="wp-descending-seed" value="<?php echo esc_attr($descending_seed); ?>">
                             <div id="wp-descending-preview" style="margin-top:14px;"></div>
                         </div>
+                        <p class="dd-hint">How the destinations are used when the rule has more than one URL. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Choose how destination URLs are used when this rule has more than one URL.</span></span></p>
                     </td>
                 </tr>
                 <tr id="dd-row-repeat"<?php echo ($redirect_source === 'provided') ? '' : ' style="display:none;"'; ?>>
                     <th>
                         Repeat List
-                        <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">When all destination URLs have been used, start again from the first URL.</span></span>
-                    </th>
+                        </th>
                     <td>
                         <label>
                             <input type="checkbox" name="links_repeat" value="1" <?php checked($links_repeat, 1); ?>>
                             Start again when the list ends
                         </label>
+                        <p class="dd-hint">Start again from the first URL once the list is used up. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">When all destination URLs have been used, start again from the first URL.</span></span></p>
                     </td>
                 </tr>
                 <?php
@@ -2160,8 +2159,7 @@ function devdredi_settings_page()
                 <tr id="dd-row-matchby"<?php echo ($rf_freq !== 'always') ? '' : ' style="display:none;"'; ?>>
                     <th>
                         Identify visitor using
-                        <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">How a returning visitor is recognized. IP + Browser/Device is stricter (separate phones, browsers, and computers on the same network count as different visitors).</span></span>
-                    </th>
+                        </th>
                     <td>
                         <div class="dd-dd w-64" data-name="rf_matchby">
                             <input type="hidden" name="rf_matchby" value="<?php echo esc_attr($rf_matchby); ?>">
@@ -2174,23 +2172,23 @@ function devdredi_settings_page()
                                 <div class="dd-dd-opt<?php echo ($rf_matchby === 'ip_ua') ? ' is-selected' : ''; ?>" data-value="ip_ua">IP + Browser/Device</div>
                             </div>
                         </div>
+                        <p class="dd-hint">IP alone is looser, IP plus browser and device is stricter. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">How a returning visitor is recognized. IP + Browser/Device is stricter (separate phones, browsers, and computers on the same network count as different visitors).</span></span></p>
                     </td>
                 </tr>
                 <tr id="dd-row-northuser"<?php echo ($rf_freq !== 'always') ? '' : ' style="display:none;"'; ?>>
                     <th>
                         Redirect On N-th User
-                        <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Redirect only every N-th unique visitor. Example: set 3 to redirect every 3rd unique visitor.</span></span>
-                    </th>
+                        </th>
                     <td>
                         <input type="number" name="open_on_every" id="wp-open-on-every" value="<?php echo esc_attr($open_on_every); ?>"
                             style="width:60px;" min="1">
+                        <p class="dd-hint">Redirect only every N-th unique visitor. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Redirect only every N-th unique visitor. Example: set 3 to redirect every 3rd unique visitor.</span></span></p>
                     </td>
                 </tr>
                 <tr id="dd-row-repeatdelay"<?php echo ($rf_freq === 'window') ? '' : ' style="display:none;"'; ?>>
                     <th>
                         Delay Before Redirecting Again
-                        <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Time gap before the same visitor can be redirected again.</span></span>
-                    </th>
+                        </th>
                     <td>
                         <div class="flex items-center gap-2">
                             <input type="number" name="revisit_delay" id="wp-revisit-delay" value="<?php echo esc_attr($revisit_delay_value); ?>"
@@ -2208,6 +2206,7 @@ function devdredi_settings_page()
                                 </div>
                             </div>
                         </div>
+                        <p class="dd-hint">Time before the same visitor can be redirected again. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Time gap before the same visitor can be redirected again.</span></span></p>
                     </td>
                 </tr>
 
@@ -2268,21 +2267,18 @@ function devdredi_settings_page()
                 </tr>
 
                 <tr id="wp-same-tab-click" style="display:none;">
-                    <th>Redirect On Click
-                        <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Wait for the visitor to click/tap anywhere before redirecting, instead of redirecting automatically.</span></span>
-                    </th>
+                    <th>Redirect On Click</th>
                     <td>
                         <label>
                             <input type="checkbox" name="same_tab_require_click" value="1" <?php checked($same_tab_require_click, 1); ?>>
                             Only redirect after the visitor clicks
                         </label>
+                        <p class="dd-hint">Wait for a click or tap before redirecting. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Wait for the visitor to click/tap anywhere before redirecting, instead of redirecting automatically.</span></span></p>
                     </td>
                 </tr>
 
                 <tr id="wp-same-tab-after-click" style="display:none;">
-                    <th>After Click Delay
-                        <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">After the visitor clicks, wait a random time (seconds) between these two values before redirecting. Max 4 seconds.</span></span>
-                    </th>
+                    <th>After Click Delay</th>
                     <td>
                         <label>
                             <input type="checkbox" name="same_tab_after_click_enabled" value="1" <?php checked($same_tab_after_click_enabled, 1); ?>>
@@ -2295,6 +2291,7 @@ function devdredi_settings_page()
                             <input type="number" step="0.001" min="0" max="4" name="same_tab_after_click_max"
                                 value="<?php echo esc_attr($same_tab_after_click_max); ?>" style="width:60px;">
                         </div>
+                        <p class="dd-hint">Random wait after the click, in seconds. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">After the visitor clicks, wait a random time (seconds) between these two values before redirecting. Max 4 seconds.</span></span></p>
                     </td>
                 </tr>
 
@@ -2323,9 +2320,7 @@ function devdredi_settings_page()
                     </td>
                 </tr>
                 <tr id="wp-after-click-delay" style="display:none;">
-                    <th>After Click Delay
-                        <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">After the visitor clicks, wait a random time (seconds) between these two values before the new tab opens. Max 4 seconds — longer gets blocked by the browser's pop-up blocker.</span></span>
-                    </th>
+                    <th>After Click Delay</th>
                     <td>
                         <label>
                             <input type="checkbox" name="after_click_enabled" value="1" <?php checked($after_click_enabled, 1); ?>>
@@ -2338,6 +2333,7 @@ function devdredi_settings_page()
                             <input type="number" step="0.001" min="0" max="4" name="after_click_max"
                                 value="<?php echo esc_attr($after_click_max); ?>" style="width:60px;">
                         </div>
+                        <p class="dd-hint">Random wait after the click before the new tab opens, in seconds. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">After the visitor clicks, wait a random time (seconds) between these two values before the new tab opens. Max 4 seconds — longer gets blocked by the browser's pop-up blocker.</span></span></p>
                     </td>
                 </tr>
             </table>
@@ -2358,11 +2354,10 @@ function devdredi_settings_page()
             <table class="form-table">
 
                 <tr>
-                    <th>Geo Service
-                        <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Before setting up the geo filter below, run this test to confirm the service is reachable from your server.</span></span>
-                    </th>
+                    <th>Geo Service</th>
                     <td>
                         <button type="button" class="dd-btn" id="wp-ipgeo-health" data-label="Test geo service">Test geo service</button>
+                        <p class="dd-hint">Run the test once before enabling the geo filter. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Before setting up the geo filter below, run this test to confirm the service is reachable from your server.</span></span></p>
                     </td>
                 </tr>
 
@@ -2411,9 +2406,7 @@ function devdredi_settings_page()
                 </tr>
 
                 <tr class="dd-geo-row"<?php echo $geo_on ? '' : ' style="display:none;"'; ?>>
-                    <th>Site Behind Proxy / CDN
-                        <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Not sure? Click Detect — it checks whether this site sits behind a proxy/CDN and ticks the box for you. Then Save.</span></span>
-                    </th>
+                    <th>Site Behind Proxy / CDN</th>
                     <td>
                         <label>
                             <input type="checkbox" name="trust_proxy" id="trust_proxy" value="1" <?php checked(devdredi_get_setting('trust_proxy', 0), 1); ?>>
@@ -2422,6 +2415,7 @@ function devdredi_settings_page()
                         <div style="margin-top:8px;">
                             <button type="button" class="dd-btn" id="wp-proxy-detect" data-label="Detect automatically">Detect automatically</button>
                         </div>
+                        <p class="dd-hint">Behind Cloudflare or another CDN, tick this so real visitor IPs are used. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Not sure? Click Detect — it checks whether this site sits behind a proxy/CDN and ticks the box for you. Then Save.</span></span></p>
                     </td>
                 </tr>
 
@@ -2441,9 +2435,7 @@ function devdredi_settings_page()
                 <div>
             <table class="form-table">
                 <tr>
-                    <th>Devices to Redirect
-                        <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Only redirect visitors on the checked device types; unchecked types pass through to your "Not Redirected Visitors" setting. Detected from the browser User-Agent.</span></span>
-                    </th>
+                    <th>Devices to Redirect</th>
                     <td>
                         <label style="margin-right:20px;">
                             <input type="checkbox" name="device_desktop" value="1" <?php checked(devdredi_get_setting('device_desktop', 1), 1); ?>>
@@ -2457,6 +2449,7 @@ function devdredi_settings_page()
                             <input type="checkbox" name="device_tablet" value="1" <?php checked(devdredi_get_setting('device_tablet', 1), 1); ?>>
                             Tablet
                         </label>
+                        <p class="dd-hint">Unchecked device types follow the Not Redirected Visitors setting. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Only redirect visitors on the checked device types; unchecked types pass through to your "Not Redirected Visitors" setting. Detected from the browser User-Agent.</span></span></p>
                     </td>
                 </tr>
             </table>
@@ -2473,22 +2466,19 @@ function devdredi_settings_page()
 
             <table class="form-table">
                 <tr>
-                    <th>Purge Page Cache On Save
-                        <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Caching plugins keep serving a stored copy of a page, which can hide a new redirect until their cache expires. With this on, saving or starting a rule clears the stored copies of the pages this rule targets, so the redirect works right away. Rules that cover the entire website clear the whole page cache.</span></span>
-                    </th>
+                    <th>Purge Page Cache On Save</th>
                     <td>
                         <label>
                             <input type="checkbox" name="purge_cache_on_save" value="1" <?php checked(devdredi_get_setting('purge_cache_on_save', 1), 1); ?>>
                             Enable
                         </label>
                         <p class="description">Works with WP Rocket, LiteSpeed Cache, W3 Total Cache, WP Super Cache, WP Fastest Cache, SiteGround Optimizer, WP-Optimize, Cache Enabler, Hummingbird and Breeze.</p>
+                        <p class="dd-hint">Clears cached copies of the targeted pages so the redirect works at once. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Caching plugins keep serving a stored copy of a page, which can hide a new redirect until their cache expires. With this on, saving or starting a rule clears the stored copies of the pages this rule targets, so the redirect works right away. Rules that cover the entire website clear the whole page cache.</span></span></p>
                     </td>
                 </tr>
                 <?php $fm = devdredi_get_setting('fallback_mode', 'leave'); if ($fm !== 'send') { $fm = 'leave'; } ?>
                 <tr>
-                    <th>Not Redirected Visitors
-                        <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">What to do with visitors who do not meet the redirect criteria.</span></span>
-                    </th>
+                    <th>Not Redirected Visitors</th>
                     <td>
                         <div class="dd-dd w-64" data-name="fallback_mode">
                             <input type="hidden" name="fallback_mode" value="<?php echo esc_attr($fm); ?>">
@@ -2501,6 +2491,7 @@ function devdredi_settings_page()
                                 <div class="dd-dd-opt<?php echo ($fm === 'send') ? ' is-selected' : ''; ?>" data-value="send">Send To Bypass Link</div>
                             </div>
                         </div>
+                        <p class="dd-hint">What happens to visitors the rule does not match. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">What to do with visitors who do not meet the redirect criteria.</span></span></p>
                     </td>
                 </tr>
                 <tr id="dd-row-bypass"<?php echo ($fm === 'send') ? '' : ' style="display:none;"'; ?>>
@@ -2530,9 +2521,7 @@ function devdredi_settings_page()
                 <div>
             <table class="form-table">
                 <tr>
-                    <th>Schedule Mode
-                        <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Always Active runs the rule all the time. Custom Schedule lets you set exactly when it runs: timezone, campaign start/end dates, total run time, weekdays, and time-of-day windows.</span></span>
-                    </th>
+                    <th>Schedule Mode</th>
                     <td>
                         <?php $rm = devdredi_get_setting('run_mode', 'unlimited'); ?>
                         <div class="dd-dd w-64" data-name="run_mode">
@@ -2546,13 +2535,12 @@ function devdredi_settings_page()
                                 <div class="dd-dd-opt<?php echo ($rm === 'set_time') ? ' is-selected' : ''; ?>" data-value="set_time">Custom Schedule</div>
                             </div>
                         </div>
+                        <p class="dd-hint">Always active, or only at the days and times you set below. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Always Active runs the rule all the time. Custom Schedule lets you set exactly when it runs: timezone, campaign start/end dates, total run time, weekdays, and time-of-day windows.</span></span></p>
                     </td>
                 </tr>
                 <tbody id="run-settings-details"<?php echo (devdredi_get_setting('run_mode', 'unlimited') === 'set_time') ? '' : ' style="display:none;"'; ?>>
                 <tr>
-                    <th>Timezone
-                        <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Weekdays and times below are evaluated in this timezone. Default uses the site's WordPress timezone.</span></span>
-                    </th>
+                    <th>Timezone</th>
                     <td>
                         <?php $sched_tz = devdredi_get_setting('schedule_timezone', ''); ?>
                         <select name="schedule_timezone" style="min-width:240px;height:34px;padding:0 12px;border:1px solid #9ca3af;border-radius:8px;box-shadow:0 1px 2px 0 rgba(0,0,0,.05);background:#fff;font-size:13px;font-weight:600;color:#374151;">
@@ -2561,17 +2549,17 @@ function devdredi_settings_page()
                                 <option value="<?php echo esc_attr($tz); ?>" <?php selected($sched_tz, $tz); ?>><?php echo esc_html($tz); ?></option>
                             <?php endforeach; ?>
                         </select>
+                        <p class="dd-hint">The days and times below are read in this timezone. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Weekdays and times below are evaluated in this timezone. Default uses the site's WordPress timezone.</span></span></p>
                     </td>
                 </tr>
                 <tr>
-                    <th>Campaign Dates
-                        <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Optional. The rule only runs between these dates (inclusive), in the timezone above. Leave blank for no date limit.</span></span>
-                    </th>
+                    <th>Campaign Dates</th>
                     <td>
                         <?php $sched_start = devdredi_get_setting('schedule_start_date', ''); $sched_end = devdredi_get_setting('schedule_end_date', ''); ?>
                         <label>From <input type="date" name="schedule_start_date" value="<?php echo esc_attr($sched_start); ?>" style="height:34px;padding:0 10px;border:1px solid #9ca3af;border-radius:8px;font-size:13px;"></label>
                         <label style="margin-left:10px;">To <input type="date" name="schedule_end_date" value="<?php echo esc_attr($sched_end); ?>" style="height:34px;padding:0 10px;border:1px solid #9ca3af;border-radius:8px;font-size:13px;"></label>
                         <p class="description">Leave blank for no date limit.</p>
+                        <p class="dd-hint">Optional start and end dates, inclusive. Blank means no limit. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Optional. The rule only runs between these dates (inclusive), in the timezone above. Leave blank for no date limit.</span></span></p>
                     </td>
                 </tr>
                 <tr>
