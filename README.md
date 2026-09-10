@@ -48,6 +48,50 @@ device, rotation or scheduling. Rank Math includes redirects only as part of its
 - **Scheduling:** start and end date and time, your timezone.
 - **Statistics per rule**, purge page cache on save (WP Rocket, LiteSpeed, W3 Total Cache, WP Super Cache and
   more), import and export.
+- **AI-agent ready:** every feature is exposed through the WordPress Abilities API and MCP, see below.
+
+## AI agents and MCP (WordPress Abilities API)
+
+Since 1.4.0, on WordPress 6.9 and newer, DevDome Redirect Manager registers every feature of the plugin as
+[WordPress Abilities](https://developer.wordpress.org/apis/abilities-api/). Any AI agent or MCP client connected to
+the site through the official [WordPress MCP Adapter](https://github.com/WordPress/mcp-adapter) discovers them
+automatically, so you can ask Claude, ChatGPT or Cursor "create a 302 for /old-promo/ to the new landing page for
+US and Canadian mobile visitors, weekdays 9 to 17 Berlin time, but don't start it yet" and the agent fills in every
+option. Every ability runs the same code as the plugin screens and is guarded by the same administrator capability;
+nothing is exposed to anonymous requests.
+
+| Ability | What it does | Kind |
+|---|---|---|
+| `devdome-redirect-manager/list-redirects` | Every rule in priority order with its full configuration, state and statistics | read |
+| `devdome-redirect-manager/get-redirect-details` | One rule with per-source, per-destination, per-country and daily counts | read |
+| `devdome-redirect-manager/get-redirect-stats` | Totals across all rules (redirects, bypassed, page views, deduplicated unique visitors, devices) plus per-rule stats | read |
+| `devdome-redirect-manager/find-404-redirect-candidates` | 404 paths real visitors hit, with suggested targets (needs DevDome Link Monitor) | read |
+| `devdome-redirect-manager/search-site-content` | Find pages, posts and categories by title to use as sources | read |
+| `devdome-redirect-manager/get-geo-status` | Geo lookup service health and proxy / CDN detection | read |
+| `devdome-redirect-manager/export-redirects` | The full configuration as JSON, same as the Export button | read |
+| `devdome-redirect-manager/create-redirect` | Create a rule with every option: what to redirect, method, destinations and rotation, open mode and delays, frequency, schedule, geo, devices, fallback, custom domains. Created stopped unless `start: true` | add |
+| `devdome-redirect-manager/update-redirect` | Change any settings of a rule; all or nothing, a refused key leaves the rule untouched | modify |
+| `devdome-redirect-manager/set-redirect-state` | Start or stop a rule (Run / Stop buttons) | modify |
+| `devdome-redirect-manager/duplicate-redirect` | Copy a rule as "<name> copy", stopped, with zero statistics | add |
+| `devdome-redirect-manager/reorder-redirects` | Set the priority order of all rules | modify |
+| `devdome-redirect-manager/delete-redirect` | Permanently delete a rule; requires `confirm: true` | destroy |
+| `devdome-redirect-manager/reset-redirect-stats` | Reset a rule's statistics and visitor memory; requires `confirm: true` | destroy |
+| `devdome-redirect-manager/purge-redirect-cache` | Purge page caches for one rule or all rules | modify |
+
+All fifteen are `public` and `show_in_rest` (`GET /wp-json/wp-abilities/v1/abilities`, authenticated). Read abilities carry
+the `readonly` annotation, add and modify abilities are non-destructive, and the two destroy abilities are annotated
+`destructive` and refuse to run without an explicit `confirm: true`. On the MCP Adapter's default server they appear as
+direct tools (`devdome-redirect-manager-create-redirect` and so on) next to the adapter's discover / execute meta-tools.
+
+Try it: install the MCP Adapter, create an application password for an administrator, then add the site to Claude Code:
+
+```json
+{"mcpServers":{"my-site":{"type":"http","url":"https://example.com/wp-json/mcp/mcp-adapter-default-server","headers":{"Authorization":"Basic <base64 user:application-password>"}}}}
+```
+
+Verified 2026-09-10 with Claude Code as the MCP client: a full-option create request ("302, Black Friday mobile, US and
+CA, weekdays 9 to 17 Berlin, once per visitor, don't start") produced a correct stopped rule unaided, a rename of a rule
+that did not exist was refused instead of guessed, and a subscriber account was denied.
 
 ## Screenshots
 

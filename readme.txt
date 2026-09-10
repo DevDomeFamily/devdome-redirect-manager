@@ -4,7 +4,7 @@ Tags: redirect, redirects, link rotator, geotargeting, 301 redirect
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.3.5
+Stable tag: 1.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -119,6 +119,10 @@ Only when you enable Geo Filtering. See the External services section for exactl
 = How do I move my rules to another site? =
 Use Export to download a JSON file of all rules, then Import on the other site. Imported rules arrive stopped, so you can review them before starting.
 
+= AI and Agent Support =
+
+On WordPress 6.9 and newer, DevDome Redirect Manager registers WordPress Abilities covering the whole plugin: list rules with their full configuration, rule details and statistics, 404 paths worth redirecting (with DevDome Link Monitor), search pages, posts and categories, geo service and proxy status, export the configuration, create a rule with every option (what to redirect, method, destinations and rotation, open mode and delays, frequency, schedule, geo, devices, fallback, custom domains), update, duplicate, reorder, start, stop and delete rules, reset a rule's statistics and purge page caches. Compatible AI agents and MCP clients can discover and use these abilities when the site exposes them, for example through the official WordPress MCP Adapter. New rules are created stopped unless the agent is told to start them; updates are all or nothing; delete and reset are marked destructive and require an explicit confirm flag. Every ability runs under the same administrator capability as the plugin screens.
+
 == External services ==
 
 **Plugin catalog (`devdome.com`).** The DevDome Dashboard inside wp-admin fetches the list of DevDome plugins (names, descriptions, logos, links, WordPress.org slugs) from `https://devdome.com/wp-plugins/catalog.json` at most once every 12 hours, so the list stays current. Only the bundled core version is sent in the request; no site or visitor data. Service provider: DevDome. Terms: https://devdome.com/terms-of-service Privacy policy: https://devdome.com/privacy-policy
@@ -167,6 +171,9 @@ Those two build inputs are not included in the distributed package. Ask for them
 5. Scheduling: run a redirect rule between dates and times in your timezone.
 
 == Changelog ==
+
+= 1.4.0 =
+* WordPress Abilities API support (WordPress 6.9+): fifteen abilities for AI agents and MCP clients covering every feature: list-redirects, get-redirect-details, get-redirect-stats, find-404-redirect-candidates, search-site-content, get-geo-status, export-redirects, create-redirect (full option set), update-redirect, set-redirect-state, duplicate-redirect, reorder-redirects, delete-redirect, reset-redirect-stats, purge-redirect-cache.
 
 = 1.3.5 =
 * Settings: every option now shows a one line hint under the control, with the info icon holding the full explanation, the same layout as DevDome Malware Scanner.
