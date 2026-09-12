@@ -4,7 +4,7 @@ Tags: redirect, redirects, link rotator, geotargeting, 301 redirect
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.4.0
+Stable tag: 1.4.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -171,6 +171,9 @@ Those two build inputs are not included in the distributed package. Ask for them
 5. Scheduling: run a redirect rule between dates and times in your timezone.
 
 == Changelog ==
+
+= 1.4.1 =
+* Connect fix (shared DevDome core 1.6.6): the connect claim now waits up to 30 seconds and keeps the handshake for 20 minutes so a refresh retries it, the DevDome hub shows why a connect failed with a Try again link, and the verify file is served through a query form for hosts that answer /.well-known/ before WordPress.
 
 = 1.4.0 =
 * WordPress Abilities API support (WordPress 6.9+): fifteen abilities for AI agents and MCP clients covering every feature: list-redirects, get-redirect-details, get-redirect-stats, find-404-redirect-candidates, search-site-content, get-geo-status, export-redirects, create-redirect (full option set), update-redirect, set-redirect-state, duplicate-redirect, reorder-redirects, delete-redirect, reset-redirect-stats, purge-redirect-cache.
