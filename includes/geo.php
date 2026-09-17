@@ -25,7 +25,7 @@ function devdredi_get_country_by_ip($ip)
         return false;
     }
 
-    $cache_key = 'devdredi_cc_' . md5($ip);
+    $cache_key = 'devdredi_cc2_' . md5($ip); // cc2: the /resolve-era keys cached a miss for every IP, they must not survive the upgrade (1.5.3)
     $cached = get_transient($cache_key);
     if ($cached !== false) {
         return $cached === '0' ? false : $cached;
@@ -35,10 +35,13 @@ function devdredi_get_country_by_ip($ip)
         return false; // the service failed within the last 5 minutes: no repeated 5-second waits per visitor
     }
 
-    $resp = wp_remote_post(DEVDREDI_GEO_ENDPOINT . '/resolve', array(
+    // /classify answers IP -> country for any caller (1.5.3). The /resolve endpoint used before is the
+    // Affiliate Manager's store-routing call and answers country null without a connected account, which
+    // silently turned every country rule into "redirect nobody".
+    $resp = wp_remote_post(DEVDREDI_GEO_ENDPOINT . '/classify', array(
         'timeout' => 5,
         'headers' => array('Content-Type' => 'application/json'),
-        'body'    => wp_json_encode(array('ip' => $ip)),
+        'body'    => wp_json_encode(array('ips' => array($ip))),
     ));
 
     if (is_wp_error($resp)) {
@@ -47,9 +50,8 @@ function devdredi_get_country_by_ip($ip)
     }
 
     $data = json_decode(wp_remote_retrieve_body($resp), true);
-    $country = (is_array($data) && !empty($data['country']))
-        ? devdredi_geo_code(sanitize_text_field($data['country']))
-        : false;
+    $row  = (is_array($data) && isset($data['results'][$ip]) && is_array($data['results'][$ip])) ? $data['results'][$ip] : array();
+    $country = !empty($row['country']) ? devdredi_geo_code(sanitize_text_field($row['country'])) : false;
 
     if ($country) {
         delete_transient('devdredi_geo_error');

@@ -4,7 +4,7 @@ Tags: redirect, redirects, link rotator, geotargeting, 301 redirect
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.5.2
+Stable tag: 1.5.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -145,7 +145,7 @@ What it is used for: turning a visitor's IP address into a two-letter country co
 
 What is sent and when:
 
-* When a rule with Geo Filtering enabled handles a front-end request, the visitor's IP address is sent to `https://api.devdome.com/geo-resolve` to look up a country code. Results are cached so the same IP is not looked up repeatedly.
+* When a rule with Geo Filtering enabled handles a front-end request, the visitor's IP address is sent to `https://api.devdome.com/geo-resolve/classify` (POST, body `{"ips":[<ip>]}`) to look up a country code. Results are cached so the same IP is not looked up repeatedly.
 * The **Test geo service** button requests `https://api.devdome.com/geo-resolve/health` to check availability. No visitor data is sent.
 * The **Detect automatically** (proxy/CDN) button runs locally on your server and sends no data to any external service.
 
@@ -179,6 +179,9 @@ Those two build inputs are not included in the distributed package. Ask for them
 5. Scheduling: run a redirect rule between dates and times in your timezone.
 
 == Changelog ==
+
+= 1.5.3 =
+* Fixed: country targeting redirected nobody. The plugin asked the DevDome geo service through a call reserved for connected accounts and always got no country back; it now uses the open lookup, so allow and block country lists work again on every site.
 
 = 1.5.2 =
 * New "Only visitors arriving from outside" checkbox under What To Redirect (every scope except Referring websites, which already works this way): the rule redirects a visitor who lands on the page from another website or with no referrer at all, and leaves a visitor who moves between pages of this site on the page. Works on cached pages through the same small footer script as Referring websites. The create-redirect and update-redirect abilities accept outside_only and get-redirect returns it.
