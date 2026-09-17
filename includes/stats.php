@@ -9,6 +9,7 @@ defined('ABSPATH') || exit;
 /** Reset all stat counters for the CURRENT (active) rule. */
 function devdredi_reset_stats()
 {
+    $GLOBALS['devdredi_write_failed'] = false;
     $keys = array(
         'visitor_count', 'page_view_count', 'ip_list', 'ua_list', 'uu_list', 'ip_link_index',
         'ip_redirected_once', 'last_redirects', 'user_redirects_count', 'user_bypass_count',
@@ -29,7 +30,11 @@ function devdredi_reset_stats()
     // rule's keys so its sequential ("First to last") counter and random queue restart on reset,
     // leaving other rules' rotation untouched. (The seq counter was previously never cleared, so
     // "First to last" wouldn't restart after a reset.)
+    unset($GLOBALS['devdredi_read_failed']);
     $rule_scope = devdredi_active_rule_id();
+    if (empty($GLOBALS['devdredi_rule']) && !empty($GLOBALS['devdredi_read_failed'])) {
+        return false; // the active rule could not be read: never clear another rule's rotation state
+    }
     $prefix = $rule_scope . '|';
     foreach (array('devdredi_user_seq_counters', 'devdredi_user_random_queue', 'devdredi_user_random_used') as $opt) {
         $vals = get_option($opt, array());
@@ -45,11 +50,22 @@ function devdredi_reset_stats()
         }
         if ($changed) {
             update_option($opt, $vals, false);
+            if (get_option($opt, array()) !== $vals) {
+                $GLOBALS['devdredi_write_failed'] = true; // read back: a rotation position that stayed is not a reset
+            }
         }
     }
 
+    if (!empty($GLOBALS['devdredi_write_failed'])) {
+        return false; // some counter is still there: not a reset, and the screen says so
+    }
+    unset($GLOBALS['devdredi_read_failed']);
     $rc = (int) devdredi_get_setting('reset_count', 0);
+    if (!empty($GLOBALS['devdredi_read_failed'])) {
+        return false; // the counter could not be read: never write a guessed value over it
+    }
     devdredi_update_setting('reset_count', $rc + 1);
+    return empty($GLOBALS['devdredi_write_failed']);
 }
 
 /**
@@ -76,7 +92,7 @@ function devdredi_bump_daily($incs, $cc = '')
         }
     }
     if (count($map) > 370) { ksort($map); $map = array_slice($map, -365, null, true); }
-    devdredi_update_setting('stats_daily', $map);
+    if (empty($GLOBALS['devdredi_read_failed'])) { devdredi_update_setting('stats_daily', $map); }
 }
 
 /** Increment count map[$key] in a setting, capping the number of distinct keys. */
@@ -93,7 +109,7 @@ function devdredi_bump_count($setting, $key, $cap = 5000)
         return; // don't grow past the cap with new keys
     }
     $map[$key] = (isset($map[$key]) ? (int) $map[$key] : 0) + 1;
-    devdredi_update_setting($setting, $map);
+    if (empty($GLOBALS['devdredi_read_failed'])) { devdredi_update_setting($setting, $map); }
 }
 
 /**
@@ -127,14 +143,15 @@ function devdredi_record_last_redirect($visitor_id)
         asort($map); // oldest timestamps first
         $map = array_slice($map, count($map) - $cap, null, true);
     }
-    devdredi_update_setting('last_redirects', $map);
+    if (empty($GLOBALS['devdredi_read_failed'])) { devdredi_update_setting('last_redirects', $map); }
 }
 
 function devdredi_track_visit($link_label, $outgoing_url = null, $status_code = null, $redirect_chain = null, $force_404 = false, $ignore_referer = false, $redirect_method = '', $redirect_id = '', $provisional = false, $custom_referrer = null, $is_slc = 0){
+    $GLOBALS['devdredi_read_failed'] = false; // a failed read below skips the write that would put a default back
     // Slim stats tracker (analytics removed). Maintains only the counters shown in the
     // Statistics panel: unique IPs, unique user-agents, unique users (IP+UA) and page views.
     $request_uri = sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ?? '' ) );
-    if (preg_match('/\.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot|webp|mp4|pdf|zip)$/i', $request_uri)) {
+    if (preg_match('/\.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot|webp|mp4|pdf|zip)$/i', (string) strtok($request_uri, '?'))) { // the path only: a query string must not hide a static asset
         return;
     }
     $user_agent = sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ?? '' ) );
@@ -160,7 +177,7 @@ function devdredi_track_visit($link_label, $outgoing_url = null, $status_code = 
         if (!is_array($ip_list)) { $ip_list = array(); }
         if (!in_array($ip, $ip_list, true) && count($ip_list) < $cap) {
             $ip_list[] = $ip;
-            devdredi_update_setting('ip_list', $ip_list);
+            if (empty($GLOBALS['devdredi_read_failed'])) { devdredi_update_setting('ip_list', $ip_list); }
         }
     }
 
@@ -169,7 +186,7 @@ function devdredi_track_visit($link_label, $outgoing_url = null, $status_code = 
         if (!is_array($ua_list)) { $ua_list = array(); }
         if (!in_array($ua, $ua_list, true) && count($ua_list) < $cap) {
             $ua_list[] = $ua;
-            devdredi_update_setting('ua_list', $ua_list);
+            if (empty($GLOBALS['devdredi_read_failed'])) { devdredi_update_setting('ua_list', $ua_list); }
         }
     }
 
@@ -182,15 +199,15 @@ function devdredi_track_visit($link_label, $outgoing_url = null, $status_code = 
         if (!is_array($uu_list)) { $uu_list = array(); }
         if (!in_array($combo, $uu_list, true) && count($uu_list) < $cap) {
             $uu_list[] = $combo;
-            devdredi_update_setting('uu_list', $uu_list);
+            if (empty($GLOBALS['devdredi_read_failed'])) { devdredi_update_setting('uu_list', $uu_list); }
             $uu = (int) devdredi_get_setting('unique_users_count', 0);
-            devdredi_update_setting('unique_users_count', $uu + 1);
+            if (empty($GLOBALS['devdredi_read_failed'])) { devdredi_update_setting('unique_users_count', $uu + 1); }
         }
     }
 
     if ($outgoing_url === null) {
         $pv = (int) devdredi_get_setting('page_view_count', 0);
-        devdredi_update_setting('page_view_count', $pv + 1);
+        if (empty($GLOBALS['devdredi_read_failed'])) { devdredi_update_setting('page_view_count', $pv + 1); }
     }
 }
 
@@ -200,13 +217,15 @@ add_action('init', function(){
     // phpcs:disable WordPress.Security.NonceVerification.Recommended -- public redirect-counter pixel hit by visitors; no nonce by design.
     if (isset($_GET['devdredi_r']) && $_GET['devdredi_r'] == '1') {
         // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- base64 payload; validated + each field sanitized after decode.
-        $payload = isset($_GET['p']) ? wp_unslash($_GET['p']) : '';
-        $label = isset($_GET['link_label']) ? sanitize_text_field(wp_unslash($_GET['link_label'])) : '';
-        $out   = isset($_GET['outgoing_url']) ? sanitize_text_field(wp_unslash($_GET['outgoing_url'])) : '';
-        $rid   = isset($_GET['rid']) ? sanitize_text_field(wp_unslash($_GET['rid'])) : '';
-        $ref   = isset($_GET['ref']) ? sanitize_text_field(wp_unslash($_GET['ref'])) : '';
-        $is_slc = isset($_GET['slc']) ? (int)$_GET['slc'] : 0;
-        $is_404 = isset($_GET['is_404']) ? (bool)$_GET['is_404'] : false;
+        // Every parameter is a string or nothing: an array (p[]=x) must never reach strtr()/sanitize (a public 500 on PHP 8).
+        $gs = function ($k) { return (isset($_GET[$k]) && is_string($_GET[$k])) ? wp_unslash($_GET[$k]) : ''; };
+        $payload = $gs('p');
+        $label = sanitize_text_field($gs('link_label'));
+        $out   = sanitize_text_field($gs('outgoing_url'));
+        $rid   = sanitize_text_field($gs('rid'));
+        $ref   = sanitize_text_field($gs('ref'));
+        $is_slc = (int) $gs('slc');
+        $is_404 = (bool) $gs('is_404');
         // phpcs:enable WordPress.Security.NonceVerification.Recommended
 
         if ($payload !== '') {
@@ -224,13 +243,21 @@ add_action('init', function(){
                 if (!empty($data['ru'])) {
                     $ru = sanitize_text_field((string) $data['ru']);
                     $rule_ids = array_map(function ($r) { return $r['id']; }, devdredi_get_rules());
-                    if (in_array($ru, $rule_ids, true)) {
-                        $GLOBALS['devdredi_rule'] = $ru;
+                    // Only a rule that is running can have redirected anyone: anything else is a forged pixel, counted nowhere.
+                    if (devdredi_rules_index_unreadable() || !in_array($ru, $rule_ids, true) || (string) devdredi_raw_get_setting('rule__' . $ru . '__plugin_state', 'stopped') !== 'running') {
+                        return;
                     }
+                    $GLOBALS['devdredi_rule'] = $ru;
+                } elseif ((string) devdredi_get_setting('plugin_state', 'stopped') !== 'running') {
+                    return; // no rule named and the active rule is not running: nothing could have redirected, count nothing
                 }
             }
         }
 
+        // Whatever the payload shape, a redirect can only be counted for a rule that is running.
+        if (empty($GLOBALS['devdredi_rule']) && (string) devdredi_get_setting('plugin_state', 'stopped') !== 'running') {
+            return;
+        }
         if ($label !== '' && $out !== '' && strpos($out, '/wp-admin/') === false) {
             $host = wp_parse_url($out, PHP_URL_HOST);
             $scheme = wp_parse_url($out, PHP_URL_SCHEME);
@@ -247,7 +274,7 @@ add_action('init', function(){
                 $is_first = (get_transient($count_key) === false);
                 if ($is_first) {
                     $rc = (int) devdredi_get_setting('user_redirects_count', 0);
-                    devdredi_update_setting('user_redirects_count', $rc + 1);
+                    if (empty($GLOBALS['devdredi_read_failed'])) { devdredi_update_setting('user_redirects_count', $rc + 1); }
                     set_transient($count_key, 1, 30);
 
                     // Per-dimension redirect counts (feed the "Redirects: N" lists).
@@ -270,7 +297,7 @@ add_action('init', function(){
                     if (function_exists('devdredi_device_type')) {
                         $dtype = devdredi_device_type();
                         $dc = (int) devdredi_get_setting('device_count_' . $dtype, 0);
-                        devdredi_update_setting('device_count_' . $dtype, $dc + 1);
+                        if (empty($GLOBALS['devdredi_read_failed'])) { devdredi_update_setting('device_count_' . $dtype, $dc + 1); }
                         $daily_dev = ($dtype === 'mobile') ? 'dm' : (($dtype === 'tablet') ? 'dt' : 'dd');
                     }
                     $daily_inc = array('red' => 1);

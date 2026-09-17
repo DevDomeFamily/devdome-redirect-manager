@@ -29,8 +29,8 @@ function devdredi_migrate_core_ids() {
             continue; // already migrated, or another suite plugin got there first
         }
         $val = get_option($old, null);
-        if (null !== $val) {
-            add_option($new, $val);
+        if (null !== $val && !add_option($new, $val) && null === get_option($new, null)) {
+            return; // the copy did not land: retried next load, never marked migrated
         }
     }
     update_option('devdredi_core_ids_migrated', 1);

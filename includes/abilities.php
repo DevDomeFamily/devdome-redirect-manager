@@ -78,6 +78,7 @@ function devdredi_ability_meta($kind)
         'add'     => array('readonly' => false, 'destructive' => false, 'idempotent' => false),
         'modify'  => array('readonly' => false, 'destructive' => null,  'idempotent' => true),
         'destroy' => array('readonly' => false, 'destructive' => true,  'idempotent' => true),
+        'reset'   => array('readonly' => false, 'destructive' => true,  'idempotent' => false), // every reset bumps reset_count
     );
     return array(
         'public'       => true,
@@ -98,8 +99,9 @@ function devdredi_ability_rule_spec_properties()
     $delay = array('type' => 'array', 'items' => array('type' => 'number', 'minimum' => 0), 'minItems' => 2, 'maxItems' => 2, 'description' => '[min, max] seconds, a random value in the range is used.');
     return array(
         'name'     => array('type' => 'string', 'description' => 'Rule nickname shown in wp-admin.'),
-        'what'     => array('type' => 'string', 'enum' => array('entire_website', 'selected_pages', 'custom_paths', 'all_404'), 'description' => 'What to redirect: every page of the site, selected existing pages/posts/categories (give their URLs in from), custom paths or URLs (from), or every 404 page.'),
-        'from'     => array('type' => 'array', 'items' => array('type' => 'string'), 'description' => 'Source paths or URLs on this site (custom_paths) or existing page URLs (selected_pages). Ignored for entire_website and all_404.'),
+        'what'     => array('type' => 'string', 'enum' => array('entire_website', 'selected_pages', 'custom_paths', 'all_404', 'referring_sites'), 'description' => 'What to redirect: every page of the site, selected existing pages/posts/categories (give their URLs in from), custom paths or URLs (from), every 404 page, or referring_sites = only visitors arriving from the websites in from (a domain like reddit.com covers its subdomains, a word like reddit covers every referring host containing it).'),
+        'from'     => array('type' => 'array', 'items' => array('type' => 'string'), 'description' => 'Source paths or URLs on this site (custom_paths) or existing page URLs (selected_pages). For selected_pages a category URL also covers every post in it and its subcategories, a product category or shop archive URL every product in it. Ignored for entire_website and all_404.'),
+        'referrer_pages' => array('type' => 'array', 'items' => array('type' => 'string'), 'description' => 'what = referring_sites only: redirect those visitors only on these existing category, page or post URLs of this site (the "Only on selected pages" option; a category URL also covers every post in it, a product category or shop archive URL every product in it). An empty array redirects them on every page.'),
         'method'   => array('type' => 'string', 'enum' => array('301', '302', '307', '308', 'js', 'meta'), 'description' => 'Redirect method. Server methods (301/302/307/308) and meta always open in the same tab.'),
         'destination_mode' => array('type' => 'string', 'enum' => array('provided', 'found', 'transit'), 'description' => 'provided = send to the URLs in to; found = send to a link or button found on the page whose URL or text contains one of found_link_contains; transit = send to the same path on transit_domain.'),
         'to'       => array('type' => 'array', 'items' => array('type' => 'string'), 'description' => 'Destination URL(s), http or https (destination_mode provided).'),
@@ -126,7 +128,8 @@ function devdredi_ability_rule_spec_properties()
         'schedule_weekdays'   => array('type' => 'array', 'items' => array('type' => 'integer', 'minimum' => 1, 'maximum' => 7), 'description' => '1 = Monday ... 7 = Sunday; empty = every day.'),
         'schedule_times'      => array('type' => 'array', 'maxItems' => 3, 'items' => array('type' => 'object', 'properties' => array('start' => array('type' => 'string'), 'end' => array('type' => 'string')), 'required' => array('start', 'end'), 'additionalProperties' => false), 'description' => 'Up to 3 daily windows, HH:MM to HH:MM; empty = all day.'),
         'run_for_minutes'     => array('type' => 'integer', 'minimum' => 0, 'description' => 'Stop automatically this many minutes after the rule starts; 0 = no limit.'),
-        'geo_enabled' => array('type' => 'boolean'),
+        'geo_enabled' => array('type' => 'boolean', 'description' => 'Turning geo targeting on sends visitor IP addresses to the DevDome geo service; it needs confirm: true.'),
+        'confirm' => array('type' => 'boolean', 'description' => 'Required (true) when the change turns geo targeting on: visitor IP addresses are then sent to api.devdome.com. Ask the user first.'),
         'geo_mode'    => array('type' => 'string', 'enum' => array('allow', 'block'), 'description' => 'allow = redirect only the listed countries; block = redirect everyone except the listed countries.'),
         'geo_countries' => array('type' => 'array', 'items' => array('type' => 'string'), 'description' => 'ISO 3166-1 alpha-2 codes, for example US, DE, GB.'),
         'trust_proxy' => array('type' => 'boolean', 'description' => 'Read the visitor IP from the proxy or CDN forwarding header (Cloudflare and similar).'),
@@ -145,7 +148,7 @@ function devdredi_ability_rs($rid, $key, $default = '')
 }
 function devdredi_ability_ws($rid, $key, $value)
 {
-    devdredi_raw_update_setting('rule__' . $rid . '__' . $key, $value);
+    return devdredi_raw_update_setting('rule__' . $rid . '__' . $key, $value) !== false;
 }
 
 /** Every stored row of one rule (setting_name => raw stored value), taken before a write so it can be rolled back. */
@@ -159,6 +162,9 @@ function devdredi_ability_snapshot_rule($rid)
         $wpdb->esc_like('rule__' . $rid . '__') . '%'
     ), ARRAY_A);
     // phpcs:enable WordPress.DB, PluginCheck.Security.DirectDB
+    if ($wpdb->last_error !== '') {
+        return null; // a failed read is not an empty rule: the caller must not write (or wipe) anything
+    }
     $out = array();
     foreach ((array) $rows as $row) {
         $out[$row['setting_name']] = $row['setting_value'];
@@ -171,13 +177,16 @@ function devdredi_ability_restore_rule($rid, $snapshot, $rules)
 {
     global $wpdb;
     $t = $wpdb->prefix . 'devdredi_settings';
-    devdredi_delete_rule_settings($rid);
+    if (!is_array($snapshot)) {
+        return false; // never wipe a rule to put back a snapshot that was not read
+    }
+    $ok = devdredi_delete_rule_settings($rid);
     foreach ($snapshot as $name => $value) {
         // phpcs:disable WordPress.DB, PluginCheck.Security.DirectDB -- plugin's own settings table; raw values written back unchanged.
-        $wpdb->insert($t, array('setting_name' => $name, 'setting_value' => $value), array('%s', '%s'));
+        $ok = $wpdb->insert($t, array('setting_name' => $name, 'setting_value' => $value), array('%s', '%s')) !== false && $ok;
         // phpcs:enable WordPress.DB, PluginCheck.Security.DirectDB
     }
-    devdredi_save_rules($rules);
+    return devdredi_save_rules($rules) && $ok;
 }
 
 function devdredi_ability_lines($text)
@@ -188,6 +197,9 @@ function devdredi_ability_lines($text)
 function devdredi_ability_rules_sorted()
 {
     $rules = devdredi_get_rules();
+    if (devdredi_rules_index_unreadable()) {
+        return new WP_Error('devdredi_db_read', __('The rule list could not be read (database error); nothing was changed.', 'devdome-redirect-manager'));
+    }
     usort($rules, function ($a, $b) {
         return ((int) (isset($a['priority']) ? $a['priority'] : 0)) - ((int) (isset($b['priority']) ? $b['priority'] : 0));
     });
@@ -219,7 +231,7 @@ function devdredi_ability_as_rule($rid, $fn)
 function devdredi_ability_purge_for_rule($rid)
 {
     if (!function_exists('devdredi_purge_page_caches')) {
-        return;
+        return false;
     }
     devdredi_ability_as_rule($rid, function () {
         $urls = function_exists('devdredi_rule_target_urls') ? devdredi_rule_target_urls() : null;
@@ -227,20 +239,24 @@ function devdredi_ability_purge_for_rule($rid)
             devdredi_purge_page_caches($urls);
         }
     });
+    return true;
 }
 
 /** The public shape of one rule: the full configuration, no visitor lists. */
 function devdredi_ability_format_rule($r, $with_maps = false)
 {
+    unset($GLOBALS['devdredi_read_failed']); // every setting below is read raw; a failed read makes the whole rule unreadable
     $rid  = (string) $r['id'];
     $rs   = function ($k, $d = '') use ($rid) { return devdredi_ability_rs($rid, $k, $d); };
     $what = (string) $rs('what_to_redirect', 'entire_website');
-    $what_map = array('entire_website' => 'entire_website', 'selected_existing' => 'selected_pages', 'custom_urls' => 'custom_paths', 'all_404' => 'all_404');
+    $what_map = array('entire_website' => 'entire_website', 'selected_existing' => 'selected_pages', 'custom_urls' => 'custom_paths', 'all_404' => 'all_404', 'referrer' => 'referring_sites');
     $sources = array();
     if ($what === 'custom_urls') {
         $sources = devdredi_ability_lines($rs('custom_links_list', ''));
     } elseif ($what === 'selected_existing') {
         $sources = devdredi_ability_lines($rs('selected_links_list', ''));
+    } elseif ($what === 'referrer') {
+        $sources = devdredi_referrer_list($rs('referrer_list', ''));
     }
     $rot = (string) $rs('links_mode', 'sequential');
     $rot_map = array('sequential' => 'sequential', 'random' => 'random', 'descending' => 'weighted', 'skip_domain' => 'skip_domain');
@@ -272,6 +288,7 @@ function devdredi_ability_format_rule($r, $with_maps = false)
         'started_at' => (int) $rs('start_time', 0) ? gmdate('c', (int) $rs('start_time', 0)) : '',
         'what'     => isset($what_map[$what]) ? $what_map[$what] : $what,
         'from'     => $sources,
+        'referrer_pages' => ($what === 'referrer' && (int) $rs('referrer_only_selected', 0) === 1) ? devdredi_ability_lines($rs('selected_links_list', '')) : array(),
         'method'   => (string) $rs('redirect_type', 'js'),
         'destination_mode' => (string) $rs('redirect_source', 'provided'),
         'to'       => devdredi_ability_lines($rs('links_list', '')),
@@ -354,6 +371,9 @@ function devdredi_ability_format_rule($r, $with_maps = false)
         $out['stats']['by_found_link']  = $by('rc_by_found');
         $out['stats']['daily']          = $days;
     }
+    if (!empty($GLOBALS['devdredi_read_failed'])) {
+        return new WP_Error('devdredi_db_read', __('The rule settings could not be read (database error).', 'devdome-redirect-manager'));
+    }
     return $out;
 }
 
@@ -371,11 +391,11 @@ function devdredi_ability_apply_spec($rid, $spec, $all)
     $cur = function ($k, $d = '') use ($rid) { return devdredi_ability_rs($rid, $k, $d); };
 
     // what + from
-    $what_map = array('entire_website' => 'entire_website', 'selected_pages' => 'selected_existing', 'custom_paths' => 'custom_urls', 'all_404' => 'all_404');
+    $what_map = array('entire_website' => 'entire_website', 'selected_pages' => 'selected_existing', 'custom_paths' => 'custom_urls', 'all_404' => 'all_404', 'referring_sites' => 'referrer');
     $what_in = (string) $get('what', array_key_exists('from', $spec) ? 'custom_paths' : 'entire_website');
     if ($has('what') || ($all && !isset($what_map[$what_in]))) {
         if (!isset($what_map[$what_in])) {
-            return new WP_Error('devdredi_bad_input', __('what must be entire_website, selected_pages, custom_paths or all_404.', 'devdome-redirect-manager'));
+            return new WP_Error('devdredi_bad_input', __('what must be entire_website, selected_pages, custom_paths, all_404 or referring_sites.', 'devdome-redirect-manager'));
         }
         $ws('what_to_redirect', $what_map[$what_in]);
     }
@@ -388,7 +408,14 @@ function devdredi_ability_apply_spec($rid, $spec, $all)
                 $from[] = $s;
             }
         }
-        if ($what_now === 'custom_urls') {
+        if ($what_now === 'referrer') {
+            // Referring websites: from = domains or words (the same cleaning the screen applies).
+            $list = devdredi_referrer_list(implode("\n", $from));
+            if (!$list) {
+                return new WP_Error('devdredi_bad_input', __('from must hold at least one referring domain (reddit.com) or word (reddit) for what = referring_sites.', 'devdome-redirect-manager'));
+            }
+            $ws('referrer_list', implode("\n", $list));
+        } elseif ($what_now === 'custom_urls') {
             $norm = function_exists('devdredi_normalize_path') ? array_filter(array_map('devdredi_normalize_path', $from)) : $from;
             $ws('custom_links_list', implode("\n", array_unique($norm)));
         } elseif ($what_now === 'selected_existing') {
@@ -398,12 +425,38 @@ function devdredi_ability_apply_spec($rid, $spec, $all)
                 $meta[] = array('label' => $u, 'url' => esc_url_raw($u), 'type' => 'page');
             }
             $ws('selected_links_meta', wp_json_encode($meta));
+            $ws('selected_links_groups', wp_json_encode(devdredi_resolve_selected_groups(array_unique($from))));
         }
         if (in_array($what_now, array('custom_urls', 'selected_existing'), true) && !$from) {
             return new WP_Error('devdredi_bad_input', __('from needs at least one path or URL for custom_paths or selected_pages.', 'devdome-redirect-manager'));
         }
     } elseif ($all && in_array($what_now, array('custom_urls', 'selected_existing'), true)) {
         return new WP_Error('devdredi_bad_input', __('from is required for custom_paths and selected_pages.', 'devdome-redirect-manager'));
+    }
+
+    // referrer_pages: "Only on selected pages" for referring_sites, stored in the picker's list like the screen does.
+    if ($has('referrer_pages')) {
+        $pages = array();
+        foreach ((array) $get('referrer_pages', array()) as $s) {
+            $s = trim(sanitize_text_field((string) $s));
+            if ($s !== '') {
+                $pages[] = $s;
+            }
+        }
+        $pages = array_values(array_unique($pages));
+        if ($pages && $what_now !== 'referrer') {
+            return new WP_Error('devdredi_bad_input', __('referrer_pages works only with what = referring_sites.', 'devdome-redirect-manager'));
+        }
+        $ws('referrer_only_selected', $pages ? 1 : 0);
+        if ($pages) {
+            $ws('selected_links_list', implode("\n", $pages));
+            $meta = array();
+            foreach ($pages as $u) {
+                $meta[] = array('label' => $u, 'url' => esc_url_raw($u), 'type' => 'page');
+            }
+            $ws('selected_links_meta', wp_json_encode($meta));
+            $ws('selected_links_groups', wp_json_encode(devdredi_resolve_selected_groups($pages)));
+        }
     }
 
     // method
@@ -571,6 +624,7 @@ function devdredi_ability_apply_spec($rid, $spec, $all)
         if ($has($dk)) {
             $dv = sanitize_text_field((string) $get($dk, ''));
             if ($dv !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dv)) {
+                /* translators: %s is the name of the date field (start_date or end_date). */
                 return new WP_Error('devdredi_bad_input', sprintf(__('%s must be YYYY-MM-DD.', 'devdome-redirect-manager'), $dk));
             }
             $ws($dk, $dv);
@@ -605,6 +659,9 @@ function devdredi_ability_apply_spec($rid, $spec, $all)
     }
     if ($has('run_for_minutes')) {
         $ws('runtime_minutes', max(0, (int) $get('run_for_minutes', 0)));
+        if ((int) $get('run_for_minutes', 0) > 0 && (string) $cur('run_mode', 'unlimited') === 'unlimited') {
+            $ws('run_mode', 'set_time'); // the engine only enforces a duration in the timed run mode
+        }
         if ((string) $cur('plugin_state', 'stopped') === 'running') {
             $ws('start_time', current_time('timestamp'));
         }
@@ -670,6 +727,29 @@ function devdredi_ability_apply_spec($rid, $spec, $all)
     if ($has('purge_cache_on_save')) {
         $ws('purge_cache_on_save', !empty($get('purge_cache_on_save', true)) ? 1 : 0);
     }
+
+    // The STORED rule must be complete whatever subset of keys arrived: a bare mode switch that leaves
+    // no sources, destinations or countries behind is refused (the caller rolls back).
+    $what_final = (string) $cur('what_to_redirect', 'entire_website');
+    if ($what_final === 'custom_urls' && trim((string) $cur('custom_links_list', '')) === '') {
+        return new WP_Error('devdredi_bad_input', __('from is required for custom_paths.', 'devdome-redirect-manager'));
+    }
+    if ($what_final === 'selected_existing' && trim((string) $cur('selected_links_list', '')) === '') {
+        return new WP_Error('devdredi_bad_input', __('from is required for selected_pages.', 'devdome-redirect-manager'));
+    }
+    if ($what_final === 'referrer' && !devdredi_referrer_list((string) $cur('referrer_list', ''))) {
+        return new WP_Error('devdredi_bad_input', __('from must hold at least one referring domain or word for what = referring_sites.', 'devdome-redirect-manager'));
+    }
+    if ((string) $cur('redirect_source', 'provided') === 'provided' && trim((string) $cur('links_list', '')) === '') {
+        return new WP_Error('devdredi_bad_input', __('to is required when destination_mode is provided.', 'devdome-redirect-manager'));
+    }
+    if ((int) $cur('geo_filter_enabled', 0) === 1) {
+        $geo_mode_final = (string) $cur('geo_filter_mode', 'whitelist');
+        $geo_csv_final  = (string) ($geo_mode_final === 'blacklist' ? $cur('geo_filter_blacklist', '') : $cur('geo_filter_whitelist', $cur('geo_filter_country_codes', '')));
+        if (trim($geo_csv_final) === '') {
+            return new WP_Error('devdredi_bad_input', __('geo_countries is required when geo_enabled is true.', 'devdome-redirect-manager'));
+        }
+    }
     return true;
 }
 
@@ -707,7 +787,13 @@ function devdredi_register_abilities()
         ),
         $spec
     );
+    unset($rule_props['confirm']); // an input-only flag, never part of a rule's output
     $rule_out = array('type' => 'object', 'properties' => $rule_props);
+    // list/create/update/duplicate return the rule WITHOUT the per-source/destination/referrer/country/daily maps
+    // (get-redirect-details has them): the schema says exactly what those handlers send.
+    $brief_props = $rule_props;
+    $brief_props['stats'] = array('type' => 'object', 'properties' => array_diff_key($stats_props, array_flip(array('by_source', 'by_destination', 'by_referrer', 'by_country', 'by_found_link', 'daily'))));
+    $rule_out_brief = array('type' => 'object', 'properties' => $brief_props);
 
     $reg = function ($id, $label, $desc, $in, $out, $cb, $kind) {
         wp_register_ability($id, array(
@@ -724,7 +810,7 @@ function devdredi_register_abilities()
 
     $reg('devdome-redirect-manager/list-redirects', __('List redirect rules', 'devdome-redirect-manager'),
         __('List every redirect rule on this WordPress site in priority order with its full configuration: running or stopped, what it redirects (entire website, selected pages, custom paths, every 404), source paths, redirect method (301, 302, 307, 308, JavaScript, meta refresh), destination mode and URLs, rotation, open mode and delays, frequency (every visit, once per visitor, every Nth visitor, revisit delay), schedule (timezone, dates, weekdays, time windows, run duration), geo targeting, device targeting, fallback, allowed domains, and totals. Read only.', 'devdome-redirect-manager'),
-        $empty_input, array('type' => 'object', 'properties' => array('total' => array('type' => 'integer'), 'items' => array('type' => 'array', 'items' => $rule_out))), 'devdredi_ability_list', 'read');
+        $empty_input, array('type' => 'object', 'properties' => array('total' => array('type' => 'integer'), 'items' => array('type' => 'array', 'items' => $rule_out_brief))), 'devdredi_ability_list', 'read');
 
     $reg('devdome-redirect-manager/get-redirect-details', __('Get redirect rule details', 'devdome-redirect-manager'),
         __('Get one redirect rule by its id with its full configuration and detailed statistics: redirects, bypassed visits, page views, unique visitors, device split, redirects per source path, per destination URL, per referrer, per country and per found link, and the last 30 days per day with countries. Read only.', 'devdome-redirect-manager'),
@@ -732,7 +818,7 @@ function devdredi_register_abilities()
 
     $reg('devdome-redirect-manager/get-redirect-stats', __('Get redirect statistics', 'devdome-redirect-manager'),
         __('Get redirect statistics for this WordPress site: total redirects, bypassed visits, page views, unique visitors and device split across all rules, the same numbers per rule, and how many rules are running. Read only.', 'devdome-redirect-manager'),
-        $empty_input, array('type' => 'object', 'properties' => array('rules_total' => array('type' => 'integer'), 'rules_running' => array('type' => 'integer'), 'totals' => array('type' => 'object', 'properties' => array('redirects' => array('type' => 'integer'), 'bypassed' => array('type' => 'integer'), 'page_views' => array('type' => 'integer'), 'unique_visitors' => array('type' => 'integer', 'description' => 'Distinct visitors across all rules, deduplicated.'), 'desktop' => array('type' => 'integer'), 'mobile' => array('type' => 'integer'), 'tablet' => array('type' => 'integer'))), 'per_rule' => array('type' => 'array', 'items' => array('type' => 'object', 'properties' => array('id' => array('type' => 'string'), 'name' => array('type' => 'string'), 'state' => array('type' => 'string'), 'what' => array('type' => 'string'), 'method' => array('type' => 'string'), 'stats' => array('type' => 'object', 'properties' => $stats_props)))))), 'devdredi_ability_stats', 'read');
+        $empty_input, array('type' => 'object', 'properties' => array('rules_total' => array('type' => 'integer'), 'rules_running' => array('type' => 'integer'), 'totals' => array('type' => 'object', 'properties' => array('redirects' => array('type' => 'integer'), 'bypassed' => array('type' => 'integer'), 'page_views' => array('type' => 'integer'), 'unique_visitors' => array('type' => 'integer', 'description' => 'Distinct visitors across all rules, deduplicated.'), 'desktop' => array('type' => 'integer'), 'mobile' => array('type' => 'integer'), 'tablet' => array('type' => 'integer'))), 'per_rule' => array('type' => 'array', 'items' => array('type' => 'object', 'properties' => array('id' => array('type' => 'string'), 'name' => array('type' => 'string'), 'state' => array('type' => 'string'), 'what' => array('type' => 'string'), 'method' => array('type' => 'string'), 'stats' => array('type' => 'object', 'properties' => $brief_props['stats']['properties'])))))), 'devdredi_ability_stats', 'read');
 
     $reg('devdome-redirect-manager/find-404-redirect-candidates', __('Find 404 paths worth redirecting', 'devdome-redirect-manager'),
         __('Find the missing pages (404 errors) on this WordPress site that real human visitors hit most, each with a suggested redirect target matched against the site\'s real page slugs, so you can create redirects for them. Needs DevDome Link Monitor active on the site (it records the 404 log). Read only.', 'devdome-redirect-manager'),
@@ -740,9 +826,9 @@ function devdredi_register_abilities()
         array('type' => 'object', 'properties' => array('items' => array('type' => 'array', 'items' => array('type' => 'object', 'properties' => array('path' => array('type' => 'string'), 'human_hits' => array('type' => 'integer'), 'bot_hits' => array('type' => 'integer'), 'last_seen' => array('type' => 'string'), 'referrer' => array('type' => 'string'), 'suggested_url' => array('type' => 'string'), 'suggested_label' => array('type' => 'string')))))), 'devdredi_ability_404_candidates', 'read');
 
     $reg('devdome-redirect-manager/search-site-content', __('Search pages, posts or categories', 'devdome-redirect-manager'),
-        __('Search this WordPress site\'s pages, posts or categories by title to get their URLs, for example to pick the existing pages a redirect rule should apply to (what = selected_pages) or a destination URL on this site. Read only.', 'devdome-redirect-manager'),
+        __('Search this WordPress site\'s pages, posts or categories by title, slug or address to get their URLs (categories also cover tags, WooCommerce product categories, brands and tags, and the shop archive), for example to pick the existing pages a redirect rule should apply to (what = selected_pages) or a destination URL on this site. Read only.', 'devdome-redirect-manager'),
         array('type' => 'object', 'properties' => array('type' => array('type' => 'string', 'enum' => array('page', 'post', 'category'), 'default' => 'page'), 'query' => array('type' => 'string', 'default' => '')), 'additionalProperties' => false),
-        array('type' => 'object', 'properties' => array('items' => array('type' => 'array', 'items' => array('type' => 'object', 'properties' => array('id' => array('type' => 'integer'), 'title' => array('type' => 'string'), 'url' => array('type' => 'string'), 'type' => array('type' => 'string')))))), 'devdredi_ability_search', 'read');
+        array('type' => 'object', 'properties' => array('items' => array('type' => 'array', 'items' => array('type' => 'object', 'properties' => array('id' => array('type' => 'integer'), 'title' => array('type' => 'string'), 'url' => array('type' => 'string'), 'type' => array('type' => 'string'), 'taxonomy' => array('type' => 'string', 'description' => 'For type category: the taxonomy the term belongs to (category, product_cat, ...).'), 'taxonomy_label' => array('type' => 'string')))))), 'devdredi_ability_search', 'read');
 
     $reg('devdome-redirect-manager/get-geo-status', __('Get geo targeting and proxy status', 'devdome-redirect-manager'),
         __('Check whether the geo targeting service (DevDome geo-resolve, no API key needed) is reachable from this WordPress site, and whether the site sits behind a proxy or CDN such as Cloudflare (in which case rules that use geo targeting or once-per-visitor should set trust_proxy). Read only; contacts api.devdome.com once.', 'devdome-redirect-manager'),
@@ -755,12 +841,12 @@ function devdredi_register_abilities()
     $reg('devdome-redirect-manager/create-redirect', __('Create a redirect rule', 'devdome-redirect-manager'),
         __('Create a new redirect rule on this WordPress site with any of the plugin\'s options: what to redirect (entire website, selected pages, custom paths, every 404) and the source paths, redirect method (301 permanent by default; 302, 307, 308, js, meta), destination mode (provided URLs with rotation, a link found on the page, or the same path on another domain), open mode and delays, frequency (every visit, once per IP or IP+browser, every Nth visitor, revisit delay), schedule (timezone, date range, weekdays, up to 3 time windows, run duration), geo targeting (allow or block countries), device targeting, fallback for non-redirected visitors, allowed custom domains and cache purge. Only from and to are required for a simple path-to-URL redirect. The rule is created STOPPED unless start is true, so nothing changes for visitors until it is started. Never edits or deletes existing rules.', 'devdome-redirect-manager'),
         array('type' => 'object', 'properties' => array_merge($spec, array('start' => array('type' => 'boolean', 'default' => false, 'description' => 'true = the rule starts redirecting visitors immediately.'))), 'additionalProperties' => false),
-        array('type' => 'object', 'properties' => array('created' => array('type' => 'boolean'), 'rule' => $rule_out)), 'devdredi_ability_create', 'add');
+        array('type' => 'object', 'properties' => array('created' => array('type' => 'boolean'), 'rule' => $rule_out_brief)), 'devdredi_ability_create', 'add');
 
     $reg('devdome-redirect-manager/update-redirect', __('Update a redirect rule', 'devdome-redirect-manager'),
         __('Change any settings of an existing redirect rule by its id: name, what to redirect and sources, method, destinations and rotation, open mode and delays, frequency, schedule, geo, devices, fallback, custom domains, cache purge. Only the keys you pass change; everything else keeps its value. The update is all or nothing: if any key is refused, the rule is left exactly as it was. Does not start or stop the rule (use set-redirect-state). Page caches are purged when the rule has purge on save enabled.', 'devdome-redirect-manager'),
         array('type' => 'object', 'properties' => array_merge($rule_id_prop, $spec), 'required' => array('rule_id'), 'additionalProperties' => false),
-        array('type' => 'object', 'properties' => array('updated' => array('type' => 'boolean'), 'rule' => $rule_out)), 'devdredi_ability_update', 'modify');
+        array('type' => 'object', 'properties' => array('updated' => array('type' => 'boolean'), 'rule' => $rule_out_brief)), 'devdredi_ability_update', 'modify');
 
     $reg('devdome-redirect-manager/set-redirect-state', __('Start or stop a redirect rule', 'devdome-redirect-manager'),
         __('Start (state running) or stop (state stopped) one redirect rule by its id. Starting makes the rule redirect visitors and purges page caches; stopping leaves the rule and its statistics in place and keeps any remaining run duration. Same as the Run and Stop buttons in wp-admin.', 'devdome-redirect-manager'),
@@ -770,7 +856,7 @@ function devdredi_register_abilities()
     $reg('devdome-redirect-manager/duplicate-redirect', __('Duplicate a redirect rule', 'devdome-redirect-manager'),
         __('Copy an existing redirect rule (all settings, no statistics) into a new rule at the end of the priority list, stopped, named "<name> copy" unless a name is given. Same as the Duplicate button in wp-admin.', 'devdome-redirect-manager'),
         array('type' => 'object', 'properties' => array_merge($rule_id_prop, array('name' => array('type' => 'string', 'default' => ''))), 'required' => array('rule_id'), 'additionalProperties' => false),
-        array('type' => 'object', 'properties' => array('created' => array('type' => 'boolean'), 'rule' => $rule_out)), 'devdredi_ability_duplicate', 'add');
+        array('type' => 'object', 'properties' => array('created' => array('type' => 'boolean'), 'rule' => $rule_out_brief)), 'devdredi_ability_duplicate', 'add');
 
     $reg('devdome-redirect-manager/reorder-redirects', __('Reorder redirect rules', 'devdome-redirect-manager'),
         __('Set the priority order of the redirect rules: pass the rule ids in the order they should be evaluated (the first running rule that matches a request wins). Rules not listed keep their relative order after the listed ones. Same as dragging rules in wp-admin.', 'devdome-redirect-manager'),
@@ -783,7 +869,7 @@ function devdredi_register_abilities()
 
     $reg('devdome-redirect-manager/reset-redirect-stats', __('Reset a rule\'s statistics', 'devdome-redirect-manager'),
         __('Reset all statistics and visitor history of one redirect rule by its id (redirect counts, unique visitors, per-source, per-destination, per-country and daily counts, once-per-visitor memory and rotation position). This cannot be undone; pass confirm: true only after the user agreed. Same as the Reset button in wp-admin.', 'devdome-redirect-manager'),
-        $confirm_input, array('type' => 'object', 'properties' => array('reset' => array('type' => 'boolean'), 'rule_id' => array('type' => 'string'))), 'devdredi_ability_reset_stats', 'destroy');
+        $confirm_input, array('type' => 'object', 'properties' => array('reset' => array('type' => 'boolean'), 'rule_id' => array('type' => 'string'))), 'devdredi_ability_reset_stats', 'reset');
 
     $reg('devdome-redirect-manager/purge-redirect-cache', __('Purge page caches for a rule', 'devdome-redirect-manager'),
         __('Purge third-party page caches (WP Rocket, LiteSpeed Cache, W3 Total Cache, WP Super Cache and similar) for the pages one redirect rule targets, so a cached copy never masks the redirect. Pass a rule_id, or none to purge for every rule. Same as the Purge cache button in wp-admin.', 'devdome-redirect-manager'),
@@ -796,8 +882,16 @@ function devdredi_register_abilities()
 function devdredi_ability_list($input = array())
 {
     $items = array();
-    foreach (devdredi_ability_rules_sorted() as $r) {
-        $items[] = devdredi_ability_format_rule($r);
+    $sorted_rules = devdredi_ability_rules_sorted();
+    if (is_wp_error($sorted_rules)) {
+        return $sorted_rules;
+    }
+    foreach ($sorted_rules as $r) {
+        $fr = devdredi_ability_format_rule($r);
+        if (is_wp_error($fr)) {
+            return $fr;
+        }
+        $items[] = $fr;
     }
     return array('total' => count($items), 'items' => $items);
 }
@@ -819,8 +913,15 @@ function devdredi_ability_stats($input = array())
     $per = array();
     $running = 0;
     $seen = array();
-    foreach (devdredi_ability_rules_sorted() as $r) {
+    $sorted_rules = devdredi_ability_rules_sorted();
+    if (is_wp_error($sorted_rules)) {
+        return $sorted_rules;
+    }
+    foreach ($sorted_rules as $r) {
         $f = devdredi_ability_format_rule($r);
+        if (is_wp_error($f)) {
+            return $f;
+        }
         foreach ($totals as $k => $v) {
             if ($k !== 'unique_visitors') {
                 $totals[$k] += (int) $f['stats'][$k];
@@ -876,18 +977,16 @@ function devdredi_ability_search($input = array())
     $q    = isset($input['query']) ? sanitize_text_field((string) $input['query']) : '';
     $items = array();
     if ($type === 'category') {
-        $terms = get_terms(array('taxonomy' => 'category', 'search' => $q, 'number' => 20, 'hide_empty' => false));
-        foreach (is_wp_error($terms) ? array() : $terms as $term) {
-            $link = get_term_link($term);
-            if (!is_wp_error($link)) {
-                $items[] = array('id' => (int) $term->term_id, 'title' => (string) $term->name, 'url' => (string) $link, 'type' => 'category');
-            }
+        // The same source the screen's picker uses: post type archives (the WooCommerce shop) and every public taxonomy
+        // (blog categories and tags, WooCommerce product categories, brands and tags, custom ones).
+        foreach (array_merge(devdredi_search_archives($q, 20), devdredi_search_category_terms($q, 50)) as $row) {
+            $items[] = array('id' => $row['id'], 'title' => $row['name'], 'url' => $row['link'], 'type' => 'category', 'taxonomy' => $row['taxonomy'], 'taxonomy_label' => $row['taxonomy_label']);
         }
     } else {
+        // Title or slug, as typed, as words or as a slug; a pasted URL or path searches by its last part (the picker's rule).
         $pt = $type === 'post' ? 'post' : 'page';
-        $posts = get_posts(array('post_type' => $pt, 'post_status' => 'publish', 's' => $q, 'posts_per_page' => 20, 'orderby' => 'title', 'order' => 'ASC'));
-        foreach ($posts as $p) {
-            $items[] = array('id' => (int) $p->ID, 'title' => (string) get_the_title($p), 'url' => (string) get_permalink($p), 'type' => $pt);
+        foreach (devdredi_search_posts($pt, $q, 20) as $row) {
+            $items[] = array('id' => $row['id'], 'title' => $row['label'], 'url' => $row['link'], 'type' => $pt);
         }
     }
     return array('items' => $items);
@@ -908,6 +1007,11 @@ function devdredi_ability_export($input = array())
     $excluded = function_exists('devdredi_io_excluded_suffixes') ? devdredi_io_excluded_suffixes() : array();
     // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB -- plugin's own settings table, same query as the Export button.
     $rows = $wpdb->get_results("SELECT setting_name, setting_value FROM {$t} WHERE setting_name LIKE 'rule\\_\\_%'", ARRAY_A);
+    $rows_failed = ($wpdb->last_error !== ''); // captured NOW: the next query resets last_error
+    $rules_out = devdredi_get_rules();
+    if ($rows_failed || devdredi_rules_index_unreadable()) {
+        return new WP_Error('devdredi_db_read', __('The rules could not be read (database error); no export was produced.', 'devdome-redirect-manager'));
+    }
     $settings = array();
     foreach ((array) $rows as $row) {
         $parts = explode('__', $row['setting_name'], 3);
@@ -919,7 +1023,7 @@ function devdredi_ability_export($input = array())
         }
         $settings[$row['setting_name']] = $row['setting_value'];
     }
-    return array('plugin' => 'devdome-redirect-manager', 'version' => 1, 'rules' => devdredi_get_rules(), 'settings' => $settings);
+    return array('plugin' => 'devdome-redirect-manager', 'version' => 1, 'rules' => $rules_out, 'settings' => $settings);
 }
 
 function devdredi_ability_create($input = array())
@@ -930,6 +1034,9 @@ function devdredi_ability_create($input = array())
     $name  = isset($input['name']) ? sanitize_text_field((string) $input['name']) : '';
 
     $rules = devdredi_get_rules();
+    if (devdredi_rules_index_unreadable()) {
+        return new WP_Error('devdredi_db_read', __('The rule list could not be read (database error); nothing was changed.', 'devdome-redirect-manager'));
+    }
     $ids   = array_map(function ($r) { return $r['id']; }, $rules);
     $rid   = devdredi_new_rule_id($ids);
 
@@ -951,20 +1058,36 @@ function devdredi_ability_create($input = array())
     if (!empty($spec['geo_countries']) && !array_key_exists('geo_enabled', $input)) {
         $spec['geo_enabled'] = true;
     }
+    if (!empty($spec['geo_enabled']) && empty($input['confirm'])) {
+        return new WP_Error('devdredi_confirm_required', __('Geo targeting sends each visitor\'s IP address to the DevDome geo service (api.devdome.com) to resolve the country. Pass confirm: true after the user agreed.', 'devdome-redirect-manager'));
+    }
+    unset($spec['confirm']);
     if (!empty($spec['geo_enabled']) && empty($spec['geo_countries'])) {
         return new WP_Error('devdredi_bad_input', __('geo_countries is required when geo_enabled is true.', 'devdome-redirect-manager'));
     }
 
+    $GLOBALS['devdredi_write_failed'] = false; // from the first write on, every failure counts
+    unset($GLOBALS['devdredi_read_failed']);
+    $rules_before = $rules; // the verified index: every rollback puts THIS back, never a fresh (possibly failed) read
     $rules[] = array('id' => $rid, 'nickname' => $name, 'priority' => count($rules) + 1);
     devdredi_save_rules($rules);
     devdredi_ability_ws($rid, 'plugin_state', 'stopped');
     devdredi_ability_ws($rid, 'start_time', 0);
 
     $ok = devdredi_ability_apply_spec($rid, $spec, true);
+    if (!is_wp_error($ok) && !empty($GLOBALS['devdredi_read_failed'])) {
+        $ok = new WP_Error('devdredi_db_read', __('A setting could not be read while the rule was written (database error); the rule was not created.', 'devdome-redirect-manager'));
+    }
+    if (!is_wp_error($ok) && !empty($GLOBALS['devdredi_write_failed'])) {
+        $ok = new WP_Error('devdredi_save_failed', __('A setting could not be written (database error); the rule was not created.', 'devdome-redirect-manager'));
+    }
     if (is_wp_error($ok)) {
-        // Roll the half-written rule back so a refused spec leaves nothing behind.
-        devdredi_delete_rule_settings($rid);
-        devdredi_save_rules(array_values(array_filter(devdredi_get_rules(), function ($r) use ($rid) { return $r['id'] !== $rid; })));
+        // Roll the half-written rule back so a refused spec leaves nothing behind; say so when even that failed.
+        $gone = devdredi_delete_rule_settings($rid);
+        $gone = devdredi_save_rules($rules_before) && $gone;
+        if (!$gone) {
+            return new WP_Error('devdredi_restore_failed', $ok->get_error_message() . ' ' . __('The half-created rule could not be removed (database error); delete it from the rule list.', 'devdome-redirect-manager'));
+        }
         return $ok;
     }
     if ($start) {
@@ -974,8 +1097,20 @@ function devdredi_ability_create($input = array())
             devdredi_ability_purge_for_rule($rid);
         }
     }
+    if (!empty($GLOBALS['devdredi_write_failed'])) {
+        // A late write (start, purge flag) failed: the rule is not what was asked, remove it.
+        $gone = devdredi_delete_rule_settings($rid);
+        $gone = devdredi_save_rules($rules_before) && $gone;
+        return new WP_Error($gone ? 'devdredi_save_failed' : 'devdredi_restore_failed', $gone
+            ? __('A setting could not be written (database error); the rule was not created.', 'devdome-redirect-manager')
+            : __('A setting could not be written AND the half-created rule could not be removed (database error); delete it from the rule list.', 'devdome-redirect-manager'));
+    }
     $r = devdredi_ability_find_rule($rid);
-    return array('created' => true, 'rule' => $r ? devdredi_ability_format_rule($r) : array('id' => $rid));
+    if (!$r) {
+        return new WP_Error('devdredi_written_unreadable', __('The rule was created but the rule list could not be read back (database error); it is stored, list the rules again before retrying.', 'devdome-redirect-manager'));
+    }
+    $fr = devdredi_ability_format_rule($r);
+    return is_wp_error($fr) ? new WP_Error('devdredi_written_unreadable', __('The rule was created but its settings could not be read back (database error); it is stored, list the rules again before retrying.', 'devdome-redirect-manager')) : array('created' => true, 'rule' => $fr);
 }
 
 function devdredi_ability_update($input = array())
@@ -989,9 +1124,27 @@ function devdredi_ability_update($input = array())
     }
     // All or nothing: the spec is applied key by key, so keep a copy to put back if any key is refused.
     $before_rules = devdredi_get_rules();
+    if (devdredi_rules_index_unreadable()) {
+        return new WP_Error('devdredi_db_read', __('The rule list could not be read (database error); nothing was changed.', 'devdome-redirect-manager'));
+    }
     $snapshot     = devdredi_ability_snapshot_rule($rid);
+    if ($snapshot === null) {
+        return new WP_Error('devdredi_db_read', __('The rule could not be read (database error); nothing was changed.', 'devdome-redirect-manager'));
+    }
+    // Geo targeting sends visitor IP addresses to the DevDome geo service: turning it on needs the user's yes.
+    $geo_now = (bool) devdredi_ability_rs($rid, 'geo_filter_enabled', 0);
+    $geo_on  = !empty($input['geo_enabled']) || (!empty($input['geo_countries']) && !array_key_exists('geo_enabled', $input));
+    if ($geo_on && !$geo_now && empty($input['confirm'])) {
+        return new WP_Error('devdredi_confirm_required', __('Geo targeting sends each visitor\'s IP address to the DevDome geo service (api.devdome.com) to resolve the country. Pass confirm: true after the user agreed.', 'devdome-redirect-manager'));
+    }
+    unset($input['confirm']);
+    $GLOBALS['devdredi_write_failed'] = false; // from the first write (the name) on
+    unset($GLOBALS['devdredi_read_failed']);   // and any read that fails while the spec is applied fed a write a guessed value
     if (array_key_exists('name', $input)) {
         $rules = devdredi_get_rules();
+        if (devdredi_rules_index_unreadable()) {
+            return new WP_Error('devdredi_db_read', __('The rule list could not be read (database error); nothing was changed.', 'devdome-redirect-manager'));
+        }
         foreach ($rules as &$x) {
             if ($x['id'] === $rid) {
                 $x['nickname'] = sanitize_text_field((string) $input['name']);
@@ -1005,15 +1158,27 @@ function devdredi_ability_update($input = array())
         $input['geo_enabled'] = true;
     }
     $ok = devdredi_ability_apply_spec($rid, $input, false);
+    if (!is_wp_error($ok) && !empty($GLOBALS['devdredi_read_failed'])) {
+        $ok = new WP_Error('devdredi_db_read', __('A setting could not be read while the change was applied (database error); the rule was put back as it was.', 'devdome-redirect-manager'));
+    }
+    if (!is_wp_error($ok) && !empty($GLOBALS['devdredi_write_failed'])) {
+        $ok = new WP_Error('devdredi_save_failed', __('A setting could not be written (database error); the rule was put back as it was.', 'devdome-redirect-manager'));
+    }
     if (is_wp_error($ok)) {
-        devdredi_ability_restore_rule($rid, $snapshot, $before_rules);
+        if (!devdredi_ability_restore_rule($rid, $snapshot, $before_rules)) {
+            return new WP_Error('devdredi_restore_failed', $ok->get_error_message() . ' ' . __('The rule could not be put back exactly as it was (database write failed); check it before running it.', 'devdome-redirect-manager'));
+        }
         return $ok;
     }
     if (devdredi_ability_rs($rid, 'purge_cache_on_save', 1)) {
         devdredi_ability_purge_for_rule($rid);
     }
     $r = devdredi_ability_find_rule($rid);
-    return array('updated' => true, 'rule' => devdredi_ability_format_rule($r));
+    if (!$r) {
+        return new WP_Error('devdredi_written_unreadable', __('The rule was updated, but the rule list could not be read back (database error); the change is stored, list the rules again.', 'devdome-redirect-manager'));
+    }
+    $fr = devdredi_ability_format_rule($r);
+    return is_wp_error($fr) ? new WP_Error('devdredi_written_unreadable', __('The rule was updated, but its settings could not be read back (database error); the change is stored, list the rules again.', 'devdome-redirect-manager')) : array('updated' => true, 'rule' => $fr);
 }
 
 function devdredi_ability_set_state($input = array())
@@ -1025,22 +1190,42 @@ function devdredi_ability_set_state($input = array())
     if (!$r) {
         return new WP_Error('devdredi_not_found', __('Redirect rule not found.', 'devdome-redirect-manager'));
     }
+    $saved = true;
     if ($state === 'running') {
-        devdredi_ability_ws($rid, 'plugin_state', 'running');
-        devdredi_ability_ws($rid, 'start_time', current_time('timestamp'));
-        if (devdredi_ability_rs($rid, 'purge_cache_on_save', 1)) {
+        // The timer first, the state second: a rule never runs without a start time. A rule that already runs keeps
+        // its start time (a retried start must not extend a timed campaign).
+        if ((string) devdredi_ability_rs($rid, 'plugin_state', 'stopped') !== 'running' || (int) devdredi_ability_rs($rid, 'start_time', 0) === 0) {
+            $saved = devdredi_ability_ws($rid, 'start_time', current_time('timestamp'));
+        }
+        $saved = $saved && devdredi_ability_ws($rid, 'plugin_state', 'running');
+        if ($saved && devdredi_ability_rs($rid, 'purge_cache_on_save', 1)) {
             devdredi_ability_purge_for_rule($rid);
         }
     } else {
         // Same as the Stop button: keep whatever run duration is left for the next start.
+        unset($GLOBALS['devdredi_read_failed']);
         $start_time = (int) devdredi_ability_rs($rid, 'start_time', 0);
         $runtime    = (int) devdredi_ability_rs($rid, 'runtime_minutes', 0);
-        devdredi_ability_ws($rid, 'plugin_state', 'stopped');
-        if ($start_time > 0 && $runtime > 0) {
-            $left = max(($start_time + $runtime * 60) - current_time('timestamp'), 0);
-            devdredi_ability_ws($rid, 'runtime_minutes', (int) ceil($left / 60));
+        if (!empty($GLOBALS['devdredi_read_failed'])) {
+            return new WP_Error('devdredi_db_read', __('The rule\x27s timer could not be read (database error); it was not stopped.', 'devdome-redirect-manager'));
         }
-        devdredi_ability_ws($rid, 'start_time', 0);
+        $saved = devdredi_ability_ws($rid, 'plugin_state', 'stopped') && (string) devdredi_ability_rs($rid, 'plugin_state', 'running') === 'stopped';
+        if ($saved) { // only a rule that really stopped keeps its remaining run time and loses its start time
+            if ($start_time > 0 && $runtime > 0) {
+                $left = max(($start_time + $runtime * 60) - current_time('timestamp'), 0);
+                $saved = devdredi_ability_ws($rid, 'runtime_minutes', (int) ceil($left / 60)) && $saved;
+            }
+            $saved = devdredi_ability_ws($rid, 'start_time', 0) && $saved;
+        }
+    }
+    // Read back: the answer is the stored state, never the requested one.
+    $stored = (string) devdredi_ability_rs($rid, 'plugin_state', 'stopped');
+    if (!$saved || $stored !== $state) {
+        return new WP_Error('devdredi_save_failed', sprintf(
+            /* translators: %s: the state the rule is really in */
+            __('The state could not be saved (database write failed); the rule is %s.', 'devdome-redirect-manager'),
+            $stored
+        ));
     }
     return array('rule_id' => $rid, 'state' => $state);
 }
@@ -1054,21 +1239,42 @@ function devdredi_ability_duplicate($input = array())
         return new WP_Error('devdredi_not_found', __('Redirect rule not found.', 'devdome-redirect-manager'));
     }
     $rules = devdredi_get_rules();
+    if (devdredi_rules_index_unreadable()) {
+        return new WP_Error('devdredi_db_read', __('The rule list could not be read (database error); nothing was changed.', 'devdome-redirect-manager'));
+    }
     $ids   = array_map(function ($r) { return $r['id']; }, $rules);
     $newid = devdredi_new_rule_id($ids);
-    devdredi_copy_rule_settings($rid, $newid);
     $name = isset($input['name']) ? sanitize_text_field((string) $input['name']) : '';
     if ($name === '') {
         $name = (!empty($src['nickname']) ? $src['nickname'] : 'Rule') . ' copy';
     }
+    $copied = devdredi_copy_rule_settings($rid, $newid);
+    // A copy never starts running and carries no statistics (same as the wp-admin Duplicate). Every write checked.
+    $copied = devdredi_ability_ws($newid, 'plugin_state', 'stopped') && $copied;
+    $copied = devdredi_ability_ws($newid, 'start_time', 0) && $copied;
+    $rules_before = $rules;
     $rules[] = array('id' => $newid, 'nickname' => $name, 'priority' => count($rules) + 1);
-    devdredi_save_rules($rules);
-    // A copy never starts running and carries no statistics (same as the wp-admin Duplicate).
-    devdredi_ability_ws($newid, 'plugin_state', 'stopped');
-    devdredi_ability_ws($newid, 'start_time', 0);
-    devdredi_ability_as_rule($newid, 'devdredi_reset_stats');
+    if (!$copied || !devdredi_save_rules($rules)) {
+        $undone = devdredi_delete_rule_settings($newid);
+        $undone = devdredi_save_rules($rules_before) && $undone;
+        return new WP_Error($undone ? 'devdredi_save_failed' : 'devdredi_restore_failed', $undone
+            ? __('The copy could not be written completely (database error); nothing was created.', 'devdome-redirect-manager')
+            : __('The copy could not be written completely AND could not be removed again (database error); check the rule list.', 'devdome-redirect-manager'));
+    }
+    if (devdredi_ability_as_rule($newid, 'devdredi_reset_stats') === false) {
+        // The copy carries statistics it promised not to: remove it again.
+        $undone = devdredi_delete_rule_settings($newid);
+        $undone = devdredi_save_rules($rules_before) && $undone;
+        return new WP_Error($undone ? 'devdredi_save_failed' : 'devdredi_restore_failed', $undone
+            ? __('The copy\'s statistics could not be cleared (database error); the copy was removed.', 'devdome-redirect-manager')
+            : __('The copy\'s statistics could not be cleared AND the copy could not be removed (database error); check the rule list.', 'devdome-redirect-manager'));
+    }
     $r = devdredi_ability_find_rule($newid);
-    return array('created' => true, 'rule' => devdredi_ability_format_rule($r));
+    if (!$r) {
+        return new WP_Error('devdredi_written_unreadable', __('The copy was created, but the rule list could not be read back (database error); it is stored, list the rules again before retrying.', 'devdome-redirect-manager'));
+    }
+    $fr = devdredi_ability_format_rule($r);
+    return is_wp_error($fr) ? new WP_Error('devdredi_written_unreadable', __('The copy was created, but its settings could not be read back (database error); it is stored, list the rules again before retrying.', 'devdome-redirect-manager')) : array('created' => true, 'rule' => $fr);
 }
 
 function devdredi_ability_reorder($input = array())
@@ -1076,12 +1282,16 @@ function devdredi_ability_reorder($input = array())
     $input = is_array($input) ? $input : array();
     $order = array_values(array_unique(array_filter(array_map(function ($x) { return sanitize_text_field((string) $x); }, (array) (isset($input['order']) ? $input['order'] : array())))));
     $rules = devdredi_get_rules();
+    if (devdredi_rules_index_unreadable()) {
+        return new WP_Error('devdredi_db_read', __('The rule list could not be read (database error); nothing was changed.', 'devdome-redirect-manager'));
+    }
     $by_id = array();
     foreach ($rules as $r) {
         $by_id[$r['id']] = $r;
     }
     $unknown = array_diff($order, array_keys($by_id));
     if ($unknown) {
+        /* translators: %s is the comma-separated list of rule ids that do not exist. */
         return new WP_Error('devdredi_not_found', sprintf(__('Unknown rule id(s): %s', 'devdome-redirect-manager'), implode(', ', $unknown)));
     }
     $re = array();
@@ -1096,7 +1306,9 @@ function devdredi_ability_reorder($input = array())
         $r['priority'] = $i + 1;
     }
     unset($r);
-    devdredi_save_rules($re);
+    if (!devdredi_save_rules($re)) {
+        return new WP_Error('devdredi_save_failed', __('The rule order could not be written (database error); the order is unchanged.', 'devdome-redirect-manager'));
+    }
     return array('order' => array_map(function ($r) { return $r['id']; }, $re));
 }
 
@@ -1108,6 +1320,9 @@ function devdredi_ability_delete($input = array())
     }
     $rid = isset($input['rule_id']) ? sanitize_text_field((string) $input['rule_id']) : '';
     $rules = devdredi_get_rules();
+    if (devdredi_rules_index_unreadable()) {
+        return new WP_Error('devdredi_db_read', __('The rule list could not be read (database error); nothing was changed.', 'devdome-redirect-manager'));
+    }
     $ids = array_map(function ($r) { return $r['id']; }, $rules);
     if ($rid === '' || !in_array($rid, $ids, true)) {
         return new WP_Error('devdredi_not_found', __('Redirect rule not found.', 'devdome-redirect-manager'));
@@ -1115,15 +1330,31 @@ function devdredi_ability_delete($input = array())
     if (count($rules) <= 1) {
         return new WP_Error('devdredi_last_rule', __('The last remaining rule cannot be deleted.', 'devdome-redirect-manager'));
     }
-    devdredi_delete_rule_settings($rid);
+    $before = $rules; // the verified index: the rollback puts THIS back, never a fresh (possibly failed) read
+    // The index first, then the rows: a failed index write leaves the rule intact instead of a ghost entry.
     $rules = array_values(array_filter($rules, function ($r) use ($rid) { return $r['id'] !== $rid; }));
     foreach ($rules as $i => &$r) {
         $r['priority'] = $i + 1;
     }
     unset($r);
-    devdredi_save_rules($rules);
-    if (devdredi_raw_get_setting('active_rule', '') === $rid) {
-        devdredi_raw_update_setting('active_rule', $rules[0]['id']);
+    if (devdredi_raw_update_setting('rm_rules', array_values($rules)) === false) {
+        return new WP_Error('devdredi_save_failed', __('The rule list could not be written (database error); nothing was deleted.', 'devdome-redirect-manager'));
+    }
+    if (!devdredi_delete_rule_settings($rid)) {
+        if (!devdredi_save_rules($before)) { // the rows are still there: keep the rule listed rather than orphaned
+            return new WP_Error('devdredi_restore_failed', __('The rule settings could not be deleted AND the rule list could not be put back (database error); check the rule list.', 'devdome-redirect-manager'));
+        }
+        return new WP_Error('devdredi_save_failed', __('The rule settings could not be deleted (database error); the rule was kept.', 'devdome-redirect-manager'));
+    }
+    unset($GLOBALS['devdredi_read_failed']);
+    $active_now = devdredi_raw_get_setting('active_rule', '');
+    if (!empty($GLOBALS['devdredi_read_failed'])) {
+        return new WP_Error('devdredi_partial', __('The rule was deleted, but the active-rule pointer could not be checked (database error); open the rule list once to reset it.', 'devdome-redirect-manager'));
+    }
+    if ($active_now === $rid) {
+        if (devdredi_raw_update_setting('active_rule', $rules[0]['id']) === false) {
+            return new WP_Error('devdredi_partial', __('The rule was deleted, but the active-rule pointer could not be moved (database error); open the rule list once to reset it.', 'devdome-redirect-manager'));
+        }
     }
     return array('deleted' => true, 'rule_id' => $rid);
 }
@@ -1138,7 +1369,11 @@ function devdredi_ability_reset_stats($input = array())
     if ($rid === '' || !devdredi_ability_find_rule($rid)) {
         return new WP_Error('devdredi_not_found', __('Redirect rule not found.', 'devdome-redirect-manager'));
     }
-    devdredi_ability_as_rule($rid, 'devdredi_reset_stats');
+    $reset_ok = true;
+    devdredi_ability_as_rule($rid, function () use (&$reset_ok) { $reset_ok = devdredi_reset_stats() !== false; });
+    if (!$reset_ok) {
+        return new WP_Error('devdredi_save_failed', __('Not every counter could be cleared (database error); the statistics were not reset.', 'devdome-redirect-manager'));
+    }
     if (function_exists('devdredi_purge_plugin_cache')) {
         devdredi_purge_plugin_cache();
     }
@@ -1156,12 +1391,18 @@ function devdredi_ability_purge($input = array())
         }
         $targets[] = $rid;
     } else {
-        foreach (devdredi_get_rules() as $r) {
+        $all_rules = devdredi_get_rules();
+        if (devdredi_rules_index_unreadable()) {
+            return new WP_Error('devdredi_db_read', __('The rule list could not be read (database error); nothing was purged.', 'devdome-redirect-manager'));
+        }
+        foreach ($all_rules as $r) {
             $targets[] = $r['id'];
         }
     }
     foreach ($targets as $t) {
-        devdredi_ability_purge_for_rule($t);
+        if (!devdredi_ability_purge_for_rule($t)) {
+            return new WP_Error('devdredi_purge_unavailable', __('The cache purge helper is not available on this site; nothing was purged.', 'devdome-redirect-manager'));
+        }
     }
     return array('purged' => true, 'rules' => $targets);
 }

@@ -4,7 +4,7 @@ Tags: redirect, redirects, link rotator, geotargeting, 301 redirect
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.4.1
+Stable tag: 1.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -42,6 +42,7 @@ Every feature is free and unlimited: unlimited rules, geo targeting, device targ
 * **Selected existing URLs** - search your Categories, Pages and Posts and add them with a live picker (chips with per-item hit counts; drag to set priority for the "found" mode).
 * **Custom URLs** - type exact paths, one per line (for example `/blog/` or `/blog/best-headphones/`), whether the page exists or not. A trailing slash matches that page and everything under it.
 * **All 404's** - the rule runs on every not-found page (handy for catching dead links).
+* **Referring websites** - the rule runs only for visitors who arrive from the websites you list. A domain (reddit.com) covers that site and its subdomains, a word (reddit) covers every referring site whose address contains it. Visitors whose browser sends no referrer, and visitors coming from your own site, are never redirected by such a rule. Tick Only on selected pages to redirect them only on the categories, pages or posts you pick.
 
 **Redirect Method** - JavaScript Redirect, 301 Permanent, 302 Temporary, 307 Temporary, 308 Permanent, or Meta Refresh. New-tab opening and client-side delays are available with the JavaScript method only; server and meta methods always open in the same tab.
 
@@ -171,6 +172,14 @@ Those two build inputs are not included in the distributed package. Ask for them
 5. Scheduling: run a redirect rule between dates and times in your timezone.
 
 == Changelog ==
+
+= 1.5.0 =
+* What To Redirect: every option now carries a one-line hint under it, so the choice is clear without opening the info icon.
+* New "What To Redirect" option: Referring websites. The rule runs only for visitors who arrive from the websites you list, one per line: a domain (reddit.com) covers that site and its subdomains, a word (reddit) covers every referring site whose address contains it. Works on cached pages through a small footer script. Tick Only on selected pages to redirect them only on the categories, pages or posts you pick. The websites are entered like the other lists: type, Add, remove one by one. The create-redirect and update-redirect abilities accept what = referring_sites with the list in from and the pages in referrer_pages.
+* Picking a category under URLs To Redirect now redirects every post in it and in its subcategories, and picking a product category or the shop archive redirects every product in it. Before, only the category's own archive pages were redirected. On sites with plain permalinks a picked category or page no longer matches every page of the site.
+* Fixed: on sites with plain permalinks the "Selected existing URLs" picker found nothing (its search request was built with a second question mark and answered 404).
+* The URLs To Redirect picker now lists every grouping of the site under Categories: blog categories and tags, WooCommerce product categories, brands and tags, custom taxonomies and the shop archive (a shop whose product base is /product-reviews/ appears there). It finds a title, a slug, a path or a full address, a hyphen no longer ends the suggestions, matches from the other tabs show up too, marked Page, Post or Category, and the Posts tab also finds single WooCommerce products and other public content. The search-content ability returns the same results.
+* Updates now work when the plugin folder belongs to another system user, for example after an install from a root shell or by an AI agent. Before, the update failed with Retry update, or an uploaded zip kept the old version (shared DevDome core 1.7.2).
 
 = 1.4.1 =
 * Connect fix (shared DevDome core 1.6.6): the connect claim now waits up to 30 seconds and keeps the handshake for 20 minutes so a refresh retries it, the DevDome hub shows why a connect failed with a Try again link, and the verify file is served through a query form for hosts that answer /.well-known/ before WordPress.

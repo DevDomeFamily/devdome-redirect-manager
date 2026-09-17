@@ -57,6 +57,9 @@ function devdredi_raw_get_setting($name, $default = '')
     // phpcs:enable WordPress.DB, PluginCheck.Security.DirectDB
 
     if ($value === null) {
+        if ($wpdb->last_error !== '') {
+            $GLOBALS['devdredi_read_failed'] = true; // a failed read is not a missing row; the save screens refuse to write on it
+        }
         return $default;
     }
 
@@ -78,12 +81,16 @@ function devdredi_raw_update_setting($name, $value)
     // that can deadlock under the concurrent writes the front-end counters generate (and it churns
     // the row's auto-increment id). The upsert updates in place on the UNIQUE setting_name key.
     // phpcs:disable WordPress.DB, PluginCheck.Security.DirectDB -- plugin's own settings table; $table_name from $wpdb->prefix; values prepared.
-    return $wpdb->query($wpdb->prepare(
+    $result = $wpdb->query($wpdb->prepare(
         "INSERT INTO $table_name (setting_name, setting_value) VALUES (%s, %s)
          ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)",
         $name,
         $stored
     ));
+    if ($result === false) {
+        $GLOBALS['devdredi_write_failed'] = true; // the save screens report this instead of "Settings saved!"
+    }
+    return $result;
     // phpcs:enable WordPress.DB, PluginCheck.Security.DirectDB
 }
 
@@ -94,13 +101,35 @@ function devdredi_get_setting($name, $default = '')
 
 function devdredi_update_setting($name, $value)
 {
-    return devdredi_raw_update_setting(devdredi_scoped_name($name), $value);
+    // Resolve the scope FIRST (that read is the one that matters): a failed read of the active-rule pointer would scope
+    // this write to the fallback rule, so it is refused instead.
+    $explicit = !empty($GLOBALS['devdredi_rule']);
+    if (!$explicit) {
+        unset($GLOBALS['devdredi_read_failed']);
+    }
+    $scoped = devdredi_scoped_name($name);
+    if (!$explicit && !empty($GLOBALS['devdredi_read_failed'])) {
+        $GLOBALS['devdredi_write_failed'] = true;
+        return false;
+    }
+    return devdredi_raw_update_setting($scoped, $value);
 }
 
 /** The rules index: list of array(id, nickname, priority). Always at least one rule. */
+/** True when the last devdredi_get_rules() could not read the index (its fallback is then a guess, never a base for a write). */
+function devdredi_rules_index_unreadable()
+{
+    return !empty($GLOBALS['devdredi_rules_read_failed']);
+}
+
 function devdredi_get_rules()
 {
+    global $wpdb;
+    $GLOBALS['devdredi_rules_read_failed'] = false;
     $rules = devdredi_raw_get_setting('rm_rules', array());
+    if ($wpdb->last_error !== '') {
+        $GLOBALS['devdredi_rules_read_failed'] = true;
+    }
     if (!is_array($rules) || empty($rules)) {
         $rules = array(array('id' => 'r1', 'nickname' => 'Rule 1', 'priority' => 1));
     }
@@ -109,7 +138,7 @@ function devdredi_get_rules()
 
 function devdredi_save_rules($rules)
 {
-    devdredi_raw_update_setting('rm_rules', array_values($rules));
+    return devdredi_raw_update_setting('rm_rules', array_values($rules)) !== false;
 }
 
 /** Generate a rule id not already in $existing_ids. */
@@ -133,13 +162,18 @@ function devdredi_copy_rule_settings($from, $to)
         $wpdb->esc_like($prefix) . '%'
     ), ARRAY_A);
     // phpcs:enable WordPress.DB, PluginCheck.Security.DirectDB
-    if (!is_array($rows)) {
-        return;
+    if (!is_array($rows) || $wpdb->last_error !== '') {
+        return false;
     }
+    $ok = true;
     foreach ($rows as $row) {
         $suffix = substr($row['setting_name'], strlen($prefix));
-        devdredi_raw_update_setting('rule__' . $to . '__' . $suffix, $row['setting_value']);
+        $ok = devdredi_raw_update_setting('rule__' . $to . '__' . $suffix, $row['setting_value']) !== false && $ok;
     }
+    if (!$ok) {
+        devdredi_delete_rule_settings($to); // no half-copied rule left behind
+    }
+    return $ok;
 }
 
 /** Delete all settings rows for a rule. */
@@ -148,11 +182,12 @@ function devdredi_delete_rule_settings($id)
     global $wpdb;
     $t = $wpdb->prefix . 'devdredi_settings';
     // phpcs:disable WordPress.DB, PluginCheck.Security.DirectDB -- plugin's own settings table; $t from $wpdb->prefix; LIKE value prepared.
-    $wpdb->query($wpdb->prepare(
+    $deleted = $wpdb->query($wpdb->prepare(
         "DELETE FROM $t WHERE setting_name LIKE %s",
         $wpdb->esc_like('rule__' . $id . '__') . '%'
     ));
     // phpcs:enable WordPress.DB, PluginCheck.Security.DirectDB
+    return $deleted !== false;
 }
 
 /**
@@ -170,6 +205,9 @@ function devdredi_maybe_migrate_rules()
 
     // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- one-time migration read of the plugin's own table; $table_name from $wpdb->prefix.
     $rows = $wpdb->get_results("SELECT setting_name, setting_value FROM $table_name", ARRAY_A);
+    if ($wpdb->last_error !== '') {
+        return; // nothing read = nothing migrated; retried next load, never marked done
+    }
     if (is_array($rows)) {
         foreach ($rows as $row) {
             $n = $row['setting_name'];
@@ -177,22 +215,32 @@ function devdredi_maybe_migrate_rules()
                 continue;
             }
             // phpcs:disable WordPress.DB, PluginCheck.Security.DirectDB -- one-time migration into the plugin's own table; $table_name from $wpdb->prefix; values prepared.
-            $wpdb->query($wpdb->prepare(
+            $migrated_ok = ($wpdb->query($wpdb->prepare(
                 "INSERT IGNORE INTO $table_name (setting_name, setting_value) VALUES (%s, %s)",
                 'rule__r1__' . $n,
                 $row['setting_value']
-            ));
+            )) !== false) && (!isset($migrated_ok) || $migrated_ok);
             // phpcs:enable WordPress.DB, PluginCheck.Security.DirectDB
         }
     }
 
-    if (devdredi_raw_get_setting('rm_rules', '') === '') {
-        devdredi_raw_update_setting('rm_rules', array(array('id' => 'r1', 'nickname' => 'Rule 1', 'priority' => 1)));
+    $migrated_ok = !isset($migrated_ok) || $migrated_ok;
+    // The index and the pointer are seeded only when their reads PROVED them missing: a failed read never seeds over them.
+    unset($GLOBALS['devdredi_read_failed']);
+    $idx_now = devdredi_raw_get_setting('rm_rules', '');
+    $act_now = devdredi_raw_get_setting('active_rule', '');
+    if (!empty($GLOBALS['devdredi_read_failed'])) {
+        return; // unknown state: retried next load
     }
-    if (devdredi_raw_get_setting('active_rule', '') === '') {
-        devdredi_raw_update_setting('active_rule', 'r1');
+    if ($idx_now === '') {
+        $migrated_ok = devdredi_raw_update_setting('rm_rules', array(array('id' => 'r1', 'nickname' => 'Rule 1', 'priority' => 1))) !== false && $migrated_ok;
     }
-    update_option('devdredi_rules_migrated', 1);
+    if ($act_now === '') {
+        $migrated_ok = devdredi_raw_update_setting('active_rule', 'r1') !== false && $migrated_ok;
+    }
+    if ($migrated_ok && $wpdb->last_error === '') {
+        update_option('devdredi_rules_migrated', 1); // a partial migration is retried on the next load, never marked done
+    }
 }
 add_action('plugins_loaded', 'devdredi_maybe_migrate_rules', 1);
 
@@ -205,13 +253,19 @@ function devdredi_maybe_drop_enabled_field()
     if (get_option('devdredi_enabled_field_dropped')) {
         return;
     }
+    unset($GLOBALS['devdredi_read_failed']);
     $rules = devdredi_raw_get_setting('rm_rules', '');
+    if (!empty($GLOBALS['devdredi_read_failed'])) {
+        return; // unknown: retried next load
+    }
     if (is_array($rules)) {
         foreach ($rules as &$r) {
             unset($r['enabled']);
         }
         unset($r);
-        devdredi_raw_update_setting('rm_rules', array_values($rules));
+        if (devdredi_raw_update_setting('rm_rules', array_values($rules)) === false) {
+            return; // retried next load
+        }
     }
     update_option('devdredi_enabled_field_dropped', 1);
 }
@@ -346,7 +400,19 @@ function devdredi_rule_target_urls()
         return null;
     }
     $list_key = ($what === 'custom_urls') ? 'custom_links_list' : 'selected_links_list';
+    // A picked category or archive covers every post in it (1.5.0): no finite URL list, purge everything.
+    if ($what === 'selected_existing') {
+        unset($GLOBALS['devdredi_read_failed']);
+        $groups = json_decode((string) devdredi_get_setting('selected_links_groups', ''), true);
+        if (!empty($groups) || !empty($GLOBALS['devdredi_read_failed'])) {
+            return null; // groups present, or unknown: purge everything rather than a guessed list
+        }
+    }
+    unset($GLOBALS['devdredi_read_failed']);
     $items = array_filter(array_map('trim', explode("\n", devdredi_get_setting($list_key, ''))));
+    if (!empty($GLOBALS['devdredi_read_failed'])) {
+        return null; // the list could not be read: purge everything rather than nothing
+    }
     $urls = array();
     foreach ($items as $item) {
         if (substr($item, -1) === '/') {
@@ -387,4 +453,19 @@ function devdredi_get_session_flag($flag){
 function devdredi_clear_session_flag($flag){
     if (!session_id()) { @session_start(); }
     unset($_SESSION[$flag]);
+}
+
+/**
+ * Per-rule setting suffixes that are statistics or run state: never exported, never imported. Lives here (not in
+ * admin.php) because export runs from REST, WP-CLI and the abilities too, where admin.php is not loaded.
+ */
+function devdredi_io_excluded_suffixes()
+{
+    return array(
+        'visitor_count', 'page_view_count', 'ip_list', 'ua_list', 'ip_link_index', 'ip_redirected_once',
+        'last_redirects', 'user_redirects_count', 'user_bypass_count', 'unique_visitor_count',
+        'unique_users_count', 'rc_by_source', 'rc_by_dest', 'rc_by_referrer', 'rc_by_country', 'rc_by_found',
+        'device_count_desktop', 'device_count_mobile', 'device_count_tablet',
+        'reset_count', 'plugin_state', 'start_time', 'stats_daily', 'uu_list',
+    );
 }

@@ -31,8 +31,11 @@ add_action('wp_ajax_devdredi_set_active', function () {
     check_ajax_referer('devdredi_rule_action', '_n');
     $id = isset($_POST['rule']) ? sanitize_text_field(wp_unslash($_POST['rule'])) : '';
     $ids = array_map(function ($r) { return $r['id']; }, devdredi_get_rules());
+    if (devdredi_rules_index_unreadable()) { wp_send_json_error('the rule list could not be read (database error); nothing was changed'); }
     if (in_array($id, $ids, true)) {
-        devdredi_raw_update_setting('active_rule', $id);
+        if (devdredi_raw_update_setting('active_rule', $id) === false) {
+            wp_send_json_error('the active rule could not be saved (database error)');
+        }
         wp_send_json_success();
     }
     wp_send_json_error('bad id');
@@ -52,7 +55,7 @@ function devdredi_rule_editable_defaults()
         'geo_filter_whitelist' => '', 'geo_filter_blacklist' => '', 'trust_proxy' => 0,
         'device_desktop' => 1, 'device_mobile' => 1, 'device_tablet' => 1, 'purge_cache_on_save' => 1,
         'fallback_mode' => 'leave',
-        'links_list' => '', 'custom_links_list' => '', 'selected_links_list' => '', 'selected_links_meta' => '',
+        'links_list' => '', 'custom_links_list' => '', 'selected_links_list' => '', 'selected_links_meta' => '', 'referrer_list' => '', 'referrer_only_selected' => 0,
         'page_links_contains' => '', 'transit_domain' => '', 'fallback_url' => '', 'plugin_state' => 'stopped',
         'run_weekdays' => array(), 'specific_times' => array(),
         'schedule_start_date' => '', 'schedule_end_date' => '',
@@ -64,11 +67,18 @@ function devdredi_rule_editable_settings($rid)
 {
     $prev = isset($GLOBALS['devdredi_rule']) ? $GLOBALS['devdredi_rule'] : null;
     $GLOBALS['devdredi_rule'] = $rid;
+    unset($GLOBALS['devdredi_read_failed']); // a form filled from defaults would overwrite the real settings on Save
     $out = array();
     foreach (devdredi_rule_editable_defaults() as $k => $def) {
         $out[$k] = devdredi_get_setting($k, $def);
     }
     $GLOBALS['devdredi_rule'] = $prev;
+    if (!empty($GLOBALS['devdredi_read_failed'])) {
+        if (wp_doing_ajax()) {
+            wp_send_json_error('the rule settings could not be read (database error); reload the page');
+        }
+        wp_die(esc_html__('The rule settings could not be read (database error). Reload the page and try again; nothing was changed.', 'devdome-redirect-manager'));
+    }
     return $out;
 }
 
@@ -153,11 +163,20 @@ add_action('wp_ajax_devdredi_add_rule', function () {
     check_ajax_referer('devdredi_rule_action', '_n');
     $rules = devdredi_get_rules();
     $ids = array_map(function ($r) { return $r['id']; }, $rules);
+    if (devdredi_rules_index_unreadable()) {
+        if (wp_doing_ajax()) { wp_send_json_error('the rule list could not be read (database error); nothing was changed'); }
+        wp_die(esc_html__('The rule list could not be read (database error); nothing was changed.', 'devdome-redirect-manager'));
+    }
     $newid = devdredi_new_rule_id($ids);
     $nick = '';
+    $rules_before = $rules;
     $rules[] = array('id' => $newid, 'nickname' => $nick, 'priority' => count($rules) + 1);
-    devdredi_save_rules($rules);
-    devdredi_raw_update_setting('active_rule', $newid);
+    if (!devdredi_save_rules($rules)) {
+        wp_send_json_error('the new rule could not be saved (database error); nothing was added');
+    }
+    if (devdredi_raw_update_setting('active_rule', $newid) === false) {
+        wp_send_json_error(devdredi_save_rules($rules_before) ? 'the new rule could not be saved (database error); nothing was added' : 'the new rule was listed but could not be made active AND could not be removed again (database error); check the rule list');
+    }
     $rm_base = admin_url('admin.php?page=devdome-redirect-manager');
     $rm_nonce = wp_create_nonce('devdredi_rule_action');
     $settings = devdredi_rule_editable_settings($newid);
@@ -180,27 +199,38 @@ add_action('wp_ajax_devdredi_rule_action', function () {
 
     $rules = devdredi_get_rules();
     $ids   = array_map(function ($r) { return $r['id']; }, $rules);
+    if (devdredi_rules_index_unreadable()) {
+        wp_send_json_error('the rule list could not be read (database error); nothing was changed');
+    }
 
     // The rule the user is currently viewing is the source of truth for "active".
     $active = in_array($editing, $ids, true) ? $editing : devdredi_raw_get_setting('active_rule', $rules[0]['id']);
-    devdredi_raw_update_setting('active_rule', $active);
+    if (devdredi_raw_update_setting('active_rule', $active) === false) {
+        wp_send_json_error('the active rule could not be switched (database error); nothing was changed');
+    }
 
     if ($action === 'duplicate' && in_array($target, $ids, true)) {
         $newid = devdredi_new_rule_id($ids);
-        devdredi_copy_rule_settings($target, $newid);
         $nick = 'Rule';
         foreach ($rules as $r) { if ($r['id'] === $target) { $nick = (!empty($r['nickname']) ? $r['nickname'] : 'Rule') . ' copy'; } }
         $rules[] = array('id' => $newid, 'nickname' => $nick, 'priority' => count($rules) + 1);
-        devdredi_save_rules($rules);
+        // Every write checked: a half-copied rule is removed again, never listed.
+        if (!devdredi_copy_rule_settings($target, $newid) || !devdredi_save_rules($rules)) {
+            $undone = devdredi_delete_rule_settings($newid);
+            $undone = devdredi_save_rules(array_values(array_filter($rules, function ($r) use ($newid) { return $r['id'] !== $newid; }))) && $undone;
+            wp_send_json_error($undone ? 'the copy could not be written completely (database error); nothing was created' : 'the copy could not be written completely AND could not be removed again (database error); check the rule list');
+        }
         $active = $newid;
-        devdredi_raw_update_setting('active_rule', $newid);
+        if (devdredi_raw_update_setting('active_rule', $newid) === false) { wp_send_json_error('the copy was created but could not be made active (database error); reload the page'); }
     } elseif ($action === 'delete' && in_array($target, $ids, true) && count($rules) > 1) {
-        devdredi_delete_rule_settings($target);
+        $before = $rules;
         $rules = array_values(array_filter($rules, function ($r) use ($target) { return $r['id'] !== $target; }));
         foreach ($rules as $i => &$r) { $r['priority'] = $i + 1; }
         unset($r);
-        devdredi_save_rules($rules);
-        if ($active === $target) { $active = $rules[0]['id']; devdredi_raw_update_setting('active_rule', $active); }
+        // Index first, rows second; a failure at either step leaves the rule whole and listed.
+        if (!devdredi_save_rules($rules)) { wp_send_json_error('the rule list could not be written (database error); nothing was deleted'); }
+        if (!devdredi_delete_rule_settings($target)) { wp_send_json_error(devdredi_save_rules($before) ? 'the rule settings could not be deleted (database error); the rule was kept' : 'the rule settings could not be deleted AND the rule list could not be put back (database error); reload and check the rule list'); }
+        if ($active === $target) { $active = $rules[0]['id']; if (devdredi_raw_update_setting('active_rule', $active) === false) { wp_send_json_error('the rule was deleted, but the active-rule pointer could not be moved (database error); reload the page'); } }
     } else {
         wp_send_json_error('bad action');
     }
@@ -218,8 +248,9 @@ add_action('wp_ajax_devdredi_rule_action', function () {
 });
 
 // Stat/runtime keys that are per-site usage data, NOT portable config. Excluded from import/export.
-function devdredi_io_excluded_suffixes()
+function devdredi_io_excluded_suffixes_admin_unused()
 {
+    // Moved to settings.php (1.5.0): export runs outside wp-admin too. Kept only so nothing here references a missing name.
     return array(
         'visitor_count', 'page_view_count', 'ip_list', 'ua_list', 'ip_link_index', 'ip_redirected_once',
         'last_redirects', 'user_redirects_count', 'user_bypass_count', 'unique_visitor_count',
@@ -242,6 +273,11 @@ add_action('admin_init', function () {
     $excluded = devdredi_io_excluded_suffixes();
     // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- export read of the plugin's own table; $t from $wpdb->prefix; static LIKE literal.
     $rows = $wpdb->get_results("SELECT setting_name, setting_value FROM {$t} WHERE setting_name LIKE 'rule\\_\\_%'", ARRAY_A);
+    $rows_failed = ($wpdb->last_error !== ''); // captured NOW: the next query resets last_error
+    $rules_for_export = devdredi_get_rules();
+    if ($rows_failed || devdredi_rules_index_unreadable()) {
+        wp_die(esc_html__('The rules could not be read (database error); no export was produced. Try again.', 'devdome-redirect-manager'));
+    }
     $settings = array();
     foreach ((array) $rows as $r) {
         $parts = explode('__', $r['setting_name'], 3); // rule | <id> | <suffix>
@@ -252,7 +288,7 @@ add_action('admin_init', function () {
     $payload = array(
         'plugin'    => 'devdome-redirect-manager',
         'version'   => 1,
-        'rules'     => devdredi_get_rules(),
+        'rules'     => $rules_for_export,
         'settings'  => $settings,
     );
     nocache_headers();
@@ -268,7 +304,8 @@ add_action('wp_ajax_devdredi_import', function () {
     if (!current_user_can('manage_options')) { wp_send_json_error('forbidden', 403); }
     check_ajax_referer('devdredi_io', '_n');
     // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- raw JSON import payload; validated + each value sanitized below.
-    $raw = isset($_POST['payload']) ? wp_unslash($_POST['payload']) : '';
+    $raw = (isset($_POST['payload']) && is_string($_POST['payload'])) ? wp_unslash($_POST['payload']) : '';
+    if (strlen($raw) > 8 * MB_IN_BYTES) { wp_send_json_error('the file is larger than 8 MB; not a settings export'); }
     $data = json_decode($raw, true);
     if (!is_array($data) || empty($data['rules']) || !is_array($data['rules']) || !isset($data['settings']) || !is_array($data['settings'])) {
         wp_send_json_error('not a valid settings file');
@@ -280,6 +317,7 @@ add_action('wp_ajax_devdredi_import', function () {
         if (!is_array($r) || empty($r['id'])) { continue; }
         $id = sanitize_key($r['id']);
         if ($id === '') { continue; }
+        if (isset($valid_ids[$id])) { wp_send_json_error('duplicate rule id in file: ' . $id); } // two rows would share one rule's settings
         $rules[] = array(
             'id'       => $id,
             'nickname' => isset($r['nickname']) ? sanitize_text_field($r['nickname']) : '',
@@ -288,16 +326,19 @@ add_action('wp_ajax_devdredi_import', function () {
         $valid_ids[$id] = true;
     }
     if (empty($rules)) { wp_send_json_error('no rules in file'); }
+    // The stored order IS the priority: sort by the file's priority, then number 1..n so both agree.
+    usort($rules, function ($a, $b) { return $a['priority'] <=> $b['priority']; });
+    foreach ($rules as $i => &$rr) { $rr['priority'] = $i + 1; }
+    unset($rr);
 
     global $wpdb;
     $t = $wpdb->prefix . 'devdredi_settings';
-    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- import wipe of the plugin's own table; $t from $wpdb->prefix; static LIKE literal.
-    $wpdb->query("DELETE FROM {$t} WHERE setting_name LIKE 'rule\\_\\_%'"); // wipe all per-rule data (config + stats)
-    devdredi_raw_update_setting('rm_rules', array_values($rules));
-    devdredi_raw_update_setting('active_rule', $rules[0]['id']);
 
+    // Validate and clean EVERYTHING first; nothing is deleted before the whole file is known to be usable.
     $excluded = devdredi_io_excluded_suffixes();
     $allowed  = devdredi_rule_editable_defaults(); // the only setting names an import may write
+    $allowed['custom_domains'] = array(); // portable too (a serialized list, accepted only as such)
+    $writes   = array();
     foreach ($data['settings'] as $name => $val) {
         if (!is_string($name) || !is_scalar($val)) { continue; }
         $val = (string) $val;
@@ -312,8 +353,72 @@ add_action('wp_ajax_devdredi_import', function () {
         if (!array_key_exists($key, $allowed)) { continue; }
         $clean = devdredi_sanitize_imported_setting($key, $val, $allowed[$key]);
         if ($clean === null) { continue; }
-        devdredi_raw_update_setting('rule__' . $rid . '__' . $key, $clean);
+        $writes['rule__' . $rid . '__' . $key] = $clean;
     }
+    // Picked categories and archives cover their posts on THIS site: resolve the groups here, never trust the file's.
+    foreach (array_keys($valid_ids) as $rid) {
+        $sel = isset($writes['rule__' . $rid . '__selected_links_list']) ? (string) $writes['rule__' . $rid . '__selected_links_list'] : '';
+        $picks = array_values(array_filter(array_map('trim', explode("\n", $sel))));
+        $writes['rule__' . $rid . '__selected_links_groups'] = ($picks && function_exists('devdredi_resolve_selected_groups')) ? wp_json_encode(devdredi_resolve_selected_groups($picks)) : '';
+    }
+
+    // Replace inside one transaction: the old rules survive any failure in the middle.
+    // phpcs:disable WordPress.DB, PluginCheck.Security.DirectDB -- plugin's own settings table; $t from $wpdb->prefix; fixed LIKE; values prepared by the setting writer.
+    // A copy of the old rows is kept in memory: if the storage engine cannot roll back, they are put back by hand.
+    $old_rows = $wpdb->get_results("SELECT setting_name, setting_value FROM {$t} WHERE setting_name LIKE 'rule\\_\\_%'", ARRAY_A);
+    if ($wpdb->last_error !== '' || devdredi_rules_index_unreadable()) {
+        wp_send_json_error('the current rules could not be read (database error); nothing was changed');
+    }
+    unset($GLOBALS['devdredi_read_failed']);
+    $old_index  = devdredi_raw_get_setting('rm_rules', array());
+    $old_active = devdredi_raw_get_setting('active_rule', '');
+    if (!empty($GLOBALS['devdredi_read_failed'])) {
+        wp_send_json_error('the current rule list could not be read (database error); nothing was changed'); // a restore must never put a guess back
+    }
+    if ($wpdb->query('START TRANSACTION') === false) {
+        wp_send_json_error('import failed: the database refused a transaction; nothing was changed');
+    }
+    $ok = $wpdb->query("DELETE FROM {$t} WHERE setting_name LIKE 'rule\\_\\_%'") !== false; // wipe all per-rule data (config + stats)
+    $ok = $ok && devdredi_raw_update_setting('rm_rules', array_values($rules)) !== false;
+    $ok = $ok && devdredi_raw_update_setting('active_rule', $rules[0]['id']) !== false;
+    foreach ($writes as $name => $clean) {
+        if (!$ok) { break; }
+        $ok = devdredi_raw_update_setting($name, $clean) !== false;
+    }
+    if ($ok && $wpdb->query('COMMIT') === false) {
+        $ok = false;
+    }
+    if (!$ok) {
+        $wpdb->query('ROLLBACK');
+        // Non-transactional storage rolls nothing back: put the old rows back by hand and say what happened.
+        // The exact old row SET (names and values), not a count: an equal-sized replacement is not "unchanged".
+        $old_map = array();
+        foreach ((array) $old_rows as $row) { $old_map[$row['setting_name']] = $row['setting_value']; }
+        $read_now = function () use ($wpdb, $t) {
+            $rows = $wpdb->get_results("SELECT setting_name, setting_value FROM {$t} WHERE setting_name LIKE 'rule\\_\\_%'", ARRAY_A);
+            if ($wpdb->last_error !== '' || !is_array($rows)) { return null; }
+            $map = array();
+            foreach ($rows as $row) { $map[$row['setting_name']] = $row['setting_value']; }
+            ksort($map);
+            return $map;
+        };
+        ksort($old_map);
+        $now_map = $read_now();
+        $restored = true;
+        if ($now_map !== $old_map || devdredi_raw_get_setting('rm_rules', array()) !== $old_index || devdredi_raw_get_setting('active_rule', '') !== $old_active) {
+            // Anything but the exact old row set: wipe whatever landed and put every old row, the index and the pointer back.
+            $restored = $wpdb->query("DELETE FROM {$t} WHERE setting_name LIKE 'rule\\_\\_%'") !== false;
+            foreach ((array) $old_rows as $row) {
+                $restored = $wpdb->insert($t, array('setting_name' => $row['setting_name'], 'setting_value' => $row['setting_value']), array('%s', '%s')) !== false && $restored;
+            }
+            $restored = devdredi_raw_update_setting('rm_rules', $old_index) !== false && $restored;
+            $restored = devdredi_raw_update_setting('active_rule', $old_active) !== false && $restored;
+            $restored = $restored && $read_now() === $old_map && devdredi_raw_get_setting('rm_rules', array()) === $old_index && devdredi_raw_get_setting('active_rule', '') === $old_active;
+        }
+        // phpcs:enable WordPress.DB, PluginCheck.Security.DirectDB
+        wp_send_json_error($restored ? 'import failed: a database write failed, nothing was changed' : 'import failed: a database write failed AND the previous rules could not be fully put back; export your rules from a backup and check the rule list');
+    }
+    // phpcs:enable WordPress.DB, PluginCheck.Security.DirectDB
 
     wp_send_json_success(array('rules' => count($rules)));
 });
@@ -345,7 +450,7 @@ function devdredi_sanitize_imported_setting($key, $raw, $default)
         return is_array($meta) ? (string) wp_json_encode(devdredi_sanitize_scalar_tree($meta)) : '';
     }
     // Multi-line lists must keep their newlines; every other setting is a single-line value.
-    $multiline = array('links_list', 'custom_links_list', 'selected_links_list', 'page_links_contains');
+    $multiline = array('links_list', 'custom_links_list', 'selected_links_list', 'page_links_contains', 'referrer_list');
     return in_array($key, $multiline, true) ? sanitize_textarea_field($raw) : sanitize_text_field($raw);
 }
 
@@ -441,6 +546,10 @@ function devdredi_handle_rule_actions()
 
     $rules = devdredi_get_rules();
     $ids = array_map(function ($r) { return $r['id']; }, $rules);
+    if (devdredi_rules_index_unreadable()) {
+        if (wp_doing_ajax()) { wp_send_json_error('the rule list could not be read (database error); nothing was changed'); }
+        wp_die(esc_html__('The rule list could not be read (database error); nothing was changed.', 'devdome-redirect-manager'));
+    }
 
     // Every branch below writes to the settings table, so the nonce is required up front.
     $nonce_ok = isset($_GET['_rmn'])
@@ -454,7 +563,9 @@ function devdredi_handle_rule_actions()
         }
         $rid = sanitize_text_field(wp_unslash($_GET['rule']));
         if (in_array($rid, $ids, true)) {
-            devdredi_raw_update_setting('active_rule', $rid);
+            if (devdredi_raw_update_setting('active_rule', $rid) === false) {
+                wp_die(esc_html__('The active rule could not be switched (database error); nothing was changed.', 'devdome-redirect-manager'));
+            }
         }
     }
 
@@ -469,12 +580,16 @@ function devdredi_handle_rule_actions()
 
     if ($action === 'add') {
         $newid = devdredi_new_rule_id($ids);
+        $rules_before = $rules;
         $rules[] = array('id' => $newid, 'nickname' => '', 'priority' => count($rules) + 1);
-        devdredi_save_rules($rules);
-        devdredi_raw_update_setting('active_rule', $newid);
+        if (!devdredi_save_rules($rules)) {
+            wp_die(esc_html__('The new rule could not be saved (database error); nothing was added.', 'devdome-redirect-manager'));
+        }
+        if (devdredi_raw_update_setting('active_rule', $newid) === false) {
+            wp_die(devdredi_save_rules($rules_before) ? esc_html__('The new rule could not be saved (database error); nothing was added.', 'devdome-redirect-manager') : esc_html__('The new rule was listed but could not be made active AND could not be removed again (database error); check the rule list.', 'devdome-redirect-manager'));
+        }
         } elseif ($action === 'duplicate' && in_array($target, $ids, true)) {
         $newid = devdredi_new_rule_id($ids);
-        devdredi_copy_rule_settings($target, $newid);
         $nick = 'Rule ' . (count($rules) + 1);
         foreach ($rules as $r) {
             if ($r['id'] === $target) {
@@ -482,29 +597,63 @@ function devdredi_handle_rule_actions()
             }
         }
         $rules[] = array('id' => $newid, 'nickname' => $nick, 'priority' => count($rules) + 1);
-        devdredi_save_rules($rules);
-        devdredi_raw_update_setting('active_rule', $newid);
+        // Every write checked: a half-copied rule is removed again, never listed.
+        if (!devdredi_copy_rule_settings($target, $newid) || !devdredi_save_rules($rules)) {
+            $undone = devdredi_delete_rule_settings($newid);
+            $undone = devdredi_save_rules(array_values(array_filter($rules, function ($r) use ($newid) { return $r['id'] !== $newid; }))) && $undone;
+            wp_die($undone ? esc_html__('The copy could not be written completely (database error); nothing was created.', 'devdome-redirect-manager') : esc_html__('The copy could not be written completely AND could not be removed again (database error); check the rule list.', 'devdome-redirect-manager'));
+        }
+        if (devdredi_raw_update_setting('active_rule', $newid) === false) {
+            wp_die(esc_html__('The copy was created but could not be made active (database error); open the rule list again.', 'devdome-redirect-manager'));
+        }
     } elseif ($action === 'delete' && in_array($target, $ids, true) && count($rules) > 1) {
-        devdredi_delete_rule_settings($target);
+        $before = $rules;
         $rules = array_values(array_filter($rules, function ($r) use ($target) { return $r['id'] !== $target; }));
         foreach ($rules as $i => &$r) {
             $r['priority'] = $i + 1;
         }
         unset($r);
-        devdredi_save_rules($rules);
+        // Index first, rows second; a failure at either step leaves the rule whole and listed.
+        if (!devdredi_save_rules($rules)) {
+            wp_die(esc_html__('The rule list could not be written (database error); nothing was deleted.', 'devdome-redirect-manager'));
+        }
+        if (!devdredi_delete_rule_settings($target)) {
+            wp_die(devdredi_save_rules($before) ? esc_html__('The rule settings could not be deleted (database error); the rule was kept.', 'devdome-redirect-manager') : esc_html__('The rule settings could not be deleted AND the rule list could not be put back (database error); reload and check the rule list.', 'devdome-redirect-manager'));
+        }
         if (devdredi_raw_get_setting('active_rule', '') === $target) {
-            devdredi_raw_update_setting('active_rule', $rules[0]['id']);
+            if (devdredi_raw_update_setting('active_rule', $rules[0]['id']) === false) {
+                wp_die(esc_html__('The rule was deleted, but the active-rule pointer could not be moved (database error); open the rule list again.', 'devdome-redirect-manager'));
+            }
         }
     } elseif ($action === 'resetstats' && in_array($target, $ids, true)) {
         $prev = isset($GLOBALS['devdredi_rule']) ? $GLOBALS['devdredi_rule'] : null;
         $GLOBALS['devdredi_rule'] = $target;
-        devdredi_reset_stats();
+        $reset_ok = devdredi_reset_stats();
         $GLOBALS['devdredi_rule'] = $prev;
+        if ($reset_ok === false) {
+            wp_die(esc_html__('Not every counter could be cleared (database error); the statistics were not reset.', 'devdome-redirect-manager'));
+        }
     }
 
     // Clean URL so the action doesn't re-run on refresh.
     wp_safe_redirect(admin_url('admin.php?page=devdome-redirect-manager'));
     exit;
+}
+
+/** The rule index must be readable before the save block writes anything: settings are scoped to the active rule id. */
+function devdredi_admin_index_readable()
+{
+    if (!empty($GLOBALS['devdredi_write_failed'])) {
+        echo '<div class="error"><p>' . esc_html__('The active rule could not be switched (database error); nothing was saved. Reload and try again.', 'devdome-redirect-manager') . '</p></div>';
+        return false;
+    }
+    $rules = devdredi_get_rules();
+    if (devdredi_rules_index_unreadable()) {
+        $GLOBALS['devdredi_read_failed'] = true;
+        echo '<div class="error"><p>' . esc_html__('The rule list could not be read (database error); nothing was saved. Reload and try again.', 'devdome-redirect-manager') . '</p></div>';
+        return false;
+    }
+    return $rules; // the verified index: the save block writes THIS, never a second read
 }
 
 function devdredi_settings_page()
@@ -517,14 +666,18 @@ function devdredi_settings_page()
         && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['devdredi_nonce'])), 'devdredi_save_settings')) {
         $edit_id = sanitize_text_field(wp_unslash($_POST['rm_editing_rule']));
         $valid_ids = array_map(function ($r) { return $r['id']; }, devdredi_get_rules());
-        if (in_array($edit_id, $valid_ids, true)) {
-            devdredi_raw_update_setting('active_rule', $edit_id);
+        if (!devdredi_rules_index_unreadable() && in_array($edit_id, $valid_ids, true)) {
+            if (devdredi_raw_update_setting('active_rule', $edit_id) === false) {
+                $GLOBALS['devdredi_write_failed'] = true; // the save block refuses: scoped writes would land on the stale rule
+                $GLOBALS['devdredi_switch_failed'] = true; // Stop and Reset refuse as well
+            }
         }
     }
 
     $Post = false;
     
-    if (isset($_POST['devdredi_save']) || isset($_POST['devdredi_purge_cache']) || isset($_POST['devdredi_run'])) {
+    // A purge-only POST (devdredi_purge_cache) never enters the save block: with the form fields absent it would reset the rule.
+    if (isset($_POST['devdredi_save']) || isset($_POST['devdredi_run'])) {
         
         if (isset($_POST['devdredi_nonce'])) {
             $nonce_check = check_admin_referer('devdredi_save_settings', 'devdredi_nonce');
@@ -541,10 +694,10 @@ function devdredi_settings_page()
     }
 
 
-    if ($Post) {
+    if ($Post && ($rm_rules_verified = devdredi_admin_index_readable()) !== false) {
 
         // Rule metadata: nickname of the active rule + drag order (priorities).
-        $rm_rules_save = devdredi_get_rules();
+        $rm_rules_save = $rm_rules_verified;
         $rm_active_save = devdredi_raw_get_setting('active_rule', $rm_rules_save[0]['id']);
         if (isset($_POST['rule_nickname'])) {
             $nick = sanitize_text_field(wp_unslash($_POST['rule_nickname']));
@@ -569,10 +722,17 @@ function devdredi_settings_page()
                 $rm_rules_save = $reordered;
             }
         }
-        devdredi_save_rules($rm_rules_save);
+        do { // one pass: a failed index write leaves this block before any scoped setting is written
+        if (!devdredi_save_rules($rm_rules_save)) {
+            $GLOBALS['devdredi_write_failed'] = true; // the notice below reports it; Run stays blocked
+            break;
+        }
 
         $old_run_mode = devdredi_get_setting('run_mode', 'unlimited');
         $run_mode = isset($_POST['run_mode']) ? sanitize_text_field(wp_unslash($_POST['run_mode'])) : 'unlimited';
+        if (!in_array($run_mode, array('unlimited', 'set_time'), true)) {
+            $run_mode = 'unlimited';
+        }
         devdredi_update_setting('run_mode', $run_mode);
 
         $schedule_timezone = isset($_POST['schedule_timezone']) ? sanitize_text_field(wp_unslash($_POST['schedule_timezone'])) : '';
@@ -627,9 +787,21 @@ function devdredi_settings_page()
         devdredi_update_setting('descending_seed', $descending_seed);
 
         $what_to_redirect = isset($_POST['what_to_redirect']) ? sanitize_text_field(wp_unslash($_POST['what_to_redirect'])) : 'entire_website';
+        if (!in_array($what_to_redirect, array('entire_website', 'selected_existing', 'custom_urls', 'referrer', 'all_404'), true)) {
+            $what_to_redirect = 'entire_website';
+        }
         devdredi_update_setting('what_to_redirect', $what_to_redirect);
 
+        // Referring websites (1.5.0): one entry per line, cleaned to a host or a word (engine devdredi_referrer_list).
+        $referrer_raw = isset($_POST['referrer_list']) ? sanitize_textarea_field(wp_unslash($_POST['referrer_list'])) : '';
+        devdredi_update_setting('referrer_list', implode("\n", devdredi_referrer_list($referrer_raw)));
+        // "Only on selected pages": the picked URLs are the URLs To Redirect picker's list (selected_links_list).
+        devdredi_update_setting('referrer_only_selected', isset($_POST['referrer_only_selected']) ? 1 : 0);
+
         $redirect_type = isset($_POST['redirect_type']) ? sanitize_text_field(wp_unslash($_POST['redirect_type'])) : 'js';
+        if (!in_array($redirect_type, array('301', '302', '307', '308', 'js', 'meta'), true)) {
+            $redirect_type = 'js';
+        }
         devdredi_update_setting('redirect_type', $redirect_type);
 
         if (isset($_POST['custom_domains_list'])) {
@@ -646,6 +818,8 @@ function devdredi_settings_page()
         $selected_array = array_filter(array_map('trim', explode("\n", $selected_list_raw)));
         $selected_links_list = implode("\n", $selected_array);
         devdredi_update_setting('selected_links_list', $selected_links_list);
+        // The categories and archives behind the picks, so the engine also redirects the posts and products in them.
+        devdredi_update_setting('selected_links_groups', wp_json_encode(devdredi_resolve_selected_groups($selected_array)));
 
         // JSON blob from the picker. json_decode does NOT sanitize, so nothing from it is stored
         // directly: only the three known fields are kept, each cleaned for its own context below.
@@ -697,21 +871,21 @@ function devdredi_settings_page()
 
         devdredi_update_setting('open_mode', $open_mode);
 
-        $same_tab_delay_min = isset($_POST['same_tab_delay_min']) ? floatval($_POST['same_tab_delay_min']) : 0;
-        $same_tab_delay_max = isset($_POST['same_tab_delay_max']) ? floatval($_POST['same_tab_delay_max']) : 0;
+        $same_tab_delay_min = isset($_POST['same_tab_delay_min']) ? max(0, floatval($_POST['same_tab_delay_min'])) : 0;
+        $same_tab_delay_max = isset($_POST['same_tab_delay_max']) ? max(0, floatval($_POST['same_tab_delay_max'])) : 0;
         devdredi_update_setting('same_tab_delay_min', $same_tab_delay_min);
         devdredi_update_setting('same_tab_delay_max', $same_tab_delay_max);
 
-        $new_tab_delay_min = isset($_POST['new_tab_delay_min']) ? floatval($_POST['new_tab_delay_min']) : 0;
-        $new_tab_delay_max = isset($_POST['new_tab_delay_max']) ? floatval($_POST['new_tab_delay_max']) : 0;
+        $new_tab_delay_min = isset($_POST['new_tab_delay_min']) ? max(0, floatval($_POST['new_tab_delay_min'])) : 0;
+        $new_tab_delay_max = isset($_POST['new_tab_delay_max']) ? max(0, floatval($_POST['new_tab_delay_max'])) : 0;
         devdredi_update_setting('new_tab_delay_min', $new_tab_delay_min);
         devdredi_update_setting('new_tab_delay_max', $new_tab_delay_max);
 
         // After Click Delay (new tab): optional, random range, each value capped at 4s
         // (longer delays get blocked by the browser pop-up blocker).
         $after_click_enabled = isset($_POST['after_click_enabled']) ? 1 : 0;
-        $after_click_min = isset($_POST['after_click_min']) ? floatval($_POST['after_click_min']) : 0;
-        $after_click_max = isset($_POST['after_click_max']) ? floatval($_POST['after_click_max']) : 0;
+        $after_click_min = isset($_POST['after_click_min']) ? max(0, floatval($_POST['after_click_min'])) : 0;
+        $after_click_max = isset($_POST['after_click_max']) ? max(0, floatval($_POST['after_click_max'])) : 0;
         $after_click_min = max(0, min(4, $after_click_min));
         $after_click_max = max(0, min(4, $after_click_max));
         if ($after_click_max < $after_click_min) $after_click_max = $after_click_min;
@@ -727,8 +901,8 @@ function devdredi_settings_page()
         // After Click Delay (same tab): optional, random range, each value capped at 4s
         // (kept consistent with the new-tab cap).
         $same_tab_after_click_enabled = isset($_POST['same_tab_after_click_enabled']) ? 1 : 0;
-        $same_tab_after_click_min = isset($_POST['same_tab_after_click_min']) ? floatval($_POST['same_tab_after_click_min']) : 0;
-        $same_tab_after_click_max = isset($_POST['same_tab_after_click_max']) ? floatval($_POST['same_tab_after_click_max']) : 0;
+        $same_tab_after_click_min = isset($_POST['same_tab_after_click_min']) ? max(0, floatval($_POST['same_tab_after_click_min'])) : 0;
+        $same_tab_after_click_max = isset($_POST['same_tab_after_click_max']) ? max(0, floatval($_POST['same_tab_after_click_max'])) : 0;
         $same_tab_after_click_min = max(0, min(4, $same_tab_after_click_min));
         $same_tab_after_click_max = max(0, min(4, $same_tab_after_click_max));
         if ($same_tab_after_click_max < $same_tab_after_click_min) $same_tab_after_click_max = $same_tab_after_click_min;
@@ -738,9 +912,9 @@ function devdredi_settings_page()
 
 
         $old_runtime_minutes = (int) devdredi_get_setting('runtime_minutes', 0);
-        $run_time_days = isset($_POST['run_time_days']) ? intval($_POST['run_time_days']) : 0;
-        $run_time_hours = isset($_POST['run_time_hours']) ? intval($_POST['run_time_hours']) : 0;
-        $run_time_minutes = isset($_POST['run_time_minutes']) ? intval($_POST['run_time_minutes']) : 0;
+        $run_time_days = isset($_POST['run_time_days']) ? max(0, intval($_POST['run_time_days'])) : 0;
+        $run_time_hours = isset($_POST['run_time_hours']) ? max(0, intval($_POST['run_time_hours'])) : 0;
+        $run_time_minutes = isset($_POST['run_time_minutes']) ? max(0, intval($_POST['run_time_minutes'])) : 0;
         $total_minutes = ($run_time_days * 24 * 60) + ($run_time_hours * 60) + $run_time_minutes;
         devdredi_update_setting('runtime_minutes', $total_minutes);
 
@@ -770,6 +944,9 @@ function devdredi_settings_page()
         devdredi_update_setting('specific_times', maybe_serialize($specific_times));
 
         $run_once = isset($_POST['run_once']) ? sanitize_text_field(wp_unslash($_POST['run_once'])) : 'never';
+        if (!in_array($run_once, array('never', 'ip', 'ip_ua'), true)) {
+            $run_once = 'never';
+        }
 
         $open_on_every = isset($_POST['open_on_every']) ? intval($_POST['open_on_every']) : 1;
         if ($open_on_every < 1) $open_on_every = 1;
@@ -800,12 +977,20 @@ function devdredi_settings_page()
         devdredi_update_setting('purge_cache_on_save', isset($_POST['purge_cache_on_save']) ? 1 : 0);
 
         $fallback_mode = isset($_POST['fallback_mode']) ? sanitize_text_field(wp_unslash($_POST['fallback_mode'])) : 'leave';
+        if (!in_array($fallback_mode, array('leave', 'send'), true)) {
+            $fallback_mode = 'leave';
+        }
         devdredi_update_setting('fallback_mode', $fallback_mode);
 
-        $fallback_url = isset($_POST['fallback_url']) ? esc_url_raw(wp_unslash($_POST['fallback_url'])) : '';
+        $fallback_url = isset($_POST['fallback_url']) ? esc_url_raw(wp_unslash($_POST['fallback_url']), array('http', 'https')) : '';
         devdredi_update_setting('fallback_url', $fallback_url);
 
-        echo '<div class="updated"><p>Settings saved!</p></div>';
+        } while (false);
+        if (!empty($GLOBALS['devdredi_write_failed']) || !empty($GLOBALS['devdredi_read_failed'])) {
+            echo '<div class="error"><p>' . esc_html__('The settings could not be saved completely (database error). Reload the rule and check its settings before running it.', 'devdome-redirect-manager') . '</p></div>';
+        } else {
+            echo '<div class="updated"><p>Settings saved!</p></div>';
+        }
 
         devdredi_check_status_and_schedule();
 
@@ -822,37 +1007,71 @@ function devdredi_settings_page()
 
     if (!empty($_POST['devdredi_run'])) {
         check_admin_referer('devdredi_save_settings', 'devdredi_nonce');
-        devdredi_update_setting('plugin_state', 'running');
-        devdredi_update_setting('start_time', current_time('timestamp'));
+        if (!empty($GLOBALS['devdredi_write_failed']) || !empty($GLOBALS['devdredi_read_failed'])) {
+            // A half-saved rule must not go live: the error notice above says what to check.
+            echo '<div class="error"><p>' . esc_html__('The rule was NOT started because its settings could not be saved completely.', 'devdome-redirect-manager') . '</p></div>';
+        } else {
+            // The rule id is fixed BEFORE any write: the recovery below must reach the same rule even if a later pointer read fails.
+            unset($GLOBALS['devdredi_read_failed']);
+            $run_rid = devdredi_active_rule_id();
+            if (!empty($GLOBALS['devdredi_read_failed'])) {
+                echo '<div class="error"><p>' . esc_html__('The rule was NOT started: the active rule could not be read (database error). Reload and try again.', 'devdome-redirect-manager') . '</p></div>';
+            } else {
+            $timer_ok = devdredi_raw_update_setting('rule__' . $run_rid . '__start_time', current_time('timestamp')) !== false;
+            $state_ok = $timer_ok && devdredi_raw_update_setting('rule__' . $run_rid . '__plugin_state', 'running') !== false;
+            $is_running = (string) devdredi_raw_get_setting('rule__' . $run_rid . '__plugin_state', 'stopped') === 'running';
+            $has_start  = (int) devdredi_raw_get_setting('rule__' . $run_rid . '__start_time', 0) > 0;
+            if (!$state_ok || !$is_running || !$has_start) {
+                // Do not leave it half started: a checked, explicit-rule stop, and the notice says what really happened.
+                $recovered = devdredi_raw_update_setting('rule__' . $run_rid . '__plugin_state', 'stopped') !== false
+                    && (string) devdredi_raw_get_setting('rule__' . $run_rid . '__plugin_state', 'running') === 'stopped';
+                echo '<div class="error"><p>' . esc_html($recovered
+                    ? __('The rule could NOT be started (database write failed); it is stopped.', 'devdome-redirect-manager')
+                    : __('The rule could NOT be started cleanly (database write failed) and its state could not be reset; reload and check whether it shows as running.', 'devdome-redirect-manager')) . '</p></div>';
+            }
+            }
+        }
     }
 
     if (!empty($_POST['devdredi_stop'])) {
         check_admin_referer('devdredi_save_settings', 'devdredi_nonce');
-        devdredi_update_setting('plugin_state', 'stopped');
+        if (!empty($GLOBALS['devdredi_switch_failed']) || devdredi_update_setting('plugin_state', 'stopped') === false || (string) devdredi_get_setting('plugin_state', 'running') !== 'stopped') {
+            echo '<div class="error"><p>' . esc_html__('The rule could NOT be stopped (database write failed); it is still running.', 'devdome-redirect-manager') . '</p></div>';
+        } else {
+            // Only a rule that really stopped keeps its remaining run time and loses its start time.
+            $start_time = (int) devdredi_get_setting('start_time', 0);
+            $runtime_minutes = (int) devdredi_get_setting('runtime_minutes', 0);
 
-        $start_time = (int) devdredi_get_setting('start_time', 0);
-        $runtime_minutes = (int) devdredi_get_setting('runtime_minutes', 0);
+            $timer_ok = true;
+            if ($start_time > 0 && $runtime_minutes > 0) {
+                $now = current_time('timestamp');
+                $end_time = $start_time + ($runtime_minutes * 60);
+                $time_left_seconds = max($end_time - $now, 0);
+                $timer_ok = devdredi_update_setting('runtime_minutes', ceil($time_left_seconds / 60)) !== false;
+            }
 
-        if ($start_time > 0 && $runtime_minutes > 0) {
-            $now = current_time('timestamp');
-            $end_time = $start_time + ($runtime_minutes * 60);
-            $time_left_seconds = max($end_time - $now, 0);
-            devdredi_update_setting('runtime_minutes', ceil($time_left_seconds / 60));
+            $timer_ok = devdredi_update_setting('start_time', 0) !== false && $timer_ok;
+            if (!$timer_ok) {
+                echo '<div class="error"><p>' . esc_html__('The rule stopped, but its remaining run time could not be saved (database error); check the run time before starting it again.', 'devdome-redirect-manager') . '</p></div>';
+            }
         }
-
-        devdredi_update_setting('start_time', 0);
     }
 
     if (!empty($_POST['devdredi_reset_stats'])) {
         check_admin_referer('devdredi_save_settings', 'devdredi_nonce');
-        
-        devdredi_reset_stats();
+
+        if (!empty($GLOBALS['devdredi_switch_failed']) || devdredi_reset_stats() === false) {
+            $GLOBALS['devdredi_write_failed'] = true;
+            echo '<div class="error"><p>' . esc_html__('Not every counter could be cleared (database error); the statistics were not reset.', 'devdome-redirect-manager') . '</p></div>';
+        }
         // (Rotation options are cleared per-rule inside devdredi_reset_stats(); the old global
         // delete_option() calls here wiped every rule's rotation state.)
 
         devdredi_purge_plugin_cache();
-        
-        echo '<div class="updated"><p>All statistics and history have been reset!</p></div>';
+
+        if (empty($GLOBALS['devdredi_write_failed'])) {
+            echo '<div class="updated"><p>All statistics and history have been reset!</p></div>';
+        }
     }
 
     if (!empty($_POST['devdredi_return'])) {
@@ -861,7 +1080,10 @@ function devdredi_settings_page()
         devdredi_update_setting('links_list', '');
         devdredi_update_setting('selected_links_list', '');
         devdredi_update_setting('selected_links_meta', '');
+        devdredi_update_setting('selected_links_groups', '');
         devdredi_update_setting('custom_links_list', '');
+        devdredi_update_setting('referrer_list', '');
+        devdredi_update_setting('referrer_only_selected', 0);
 
         $default_settings = array(
             'run_mode' => 'unlimited',
@@ -1040,7 +1262,7 @@ function devdredi_settings_page()
                 var f=inp.files&&inp.files[0]; if(!f) return;
                 var rd=new FileReader();
                 rd.onload=function(){
-                    if(!confirm('Import settings? This REPLACES every rule on this site with the rules in the file. Imported rules arrive stopped.')) return;
+                    if(!confirm('Import settings? This REPLACES every rule on this site with the rules in the file, and deletes the statistics and history of the current rules. Imported rules arrive stopped.')) return;
                     var fd=new FormData(); fd.append('action','devdredi_import'); fd.append('_n',NONCE); fd.append('payload',rd.result);
                     btn.style.opacity='.5';
                     fetch(AJAX,{method:'POST',credentials:'same-origin',body:fd}).then(function(r){return r.json();}).then(function(res){
@@ -1311,13 +1533,18 @@ function devdredi_settings_page()
                 function syncWhatToRedirect() {
                     var v = '';
                     wtrRadios.forEach(function (r) { if (r.checked) v = r.value; });
-                    var showRow = (v === 'selected_existing' || v === 'custom_urls');
+                    // Referring websites with "Only on selected pages" ticked opens the same URLs To Redirect picker (1.5.0).
+                    var refOnly = document.getElementById('dd-ref-only-selected');
+                    var refPick = (v === 'referrer') && !!(refOnly && refOnly.checked);
+                    var showRow = (v === 'selected_existing' || v === 'custom_urls' || refPick);
                     if (rowTarget) rowTarget.style.display = showRow ? '' : 'none';
+                    var rowRef = document.getElementById('dd-row-referrer');
+                    if (rowRef) rowRef.style.display = (v === 'referrer') ? '' : 'none';
                     var picker = document.getElementById('rm-picker-block');
                     var custom = document.getElementById('devdredi-custom-block');
-                    if (picker) picker.style.display = (v === 'selected_existing') ? '' : 'none';
+                    if (picker) picker.style.display = (v === 'selected_existing' || refPick) ? '' : 'none';
                     if (custom) custom.style.display = (v === 'custom_urls') ? '' : 'none';
-                    var rsFound = document.querySelector('label[data-rs="found"]');
+                    var rsFound = document.querySelector('[data-rs="found"]');
                     if (rsFound) {
                         if (v === 'all_404') {
                             rsFound.style.display = 'none';
@@ -1332,6 +1559,8 @@ function devdredi_settings_page()
                     }
                 }
                 wtrRadios.forEach(function (r) { r.addEventListener('change', syncWhatToRedirect); });
+                var refOnlyBox = document.getElementById('dd-ref-only-selected');
+                if (refOnlyBox) refOnlyBox.addEventListener('change', syncWhatToRedirect);
                 syncWhatToRedirect();
 
                 /* Live link-count: count only lines that look like a real path/URL (no spaces / free text) */
@@ -1427,6 +1656,71 @@ function devdredi_settings_page()
                     cuRender();
                     cuUpdateEntered();
                     window.DEVDREDI_REINIT.push(function(){ cuItems = cuStore.value.split('\n').map(function(l){return l.trim();}).filter(isLink); cuRender(); cuUpdateEntered(); });
+                }
+
+                /* Referring websites: input + Add -> list rows (DESIGN.md 10, same look/logic as Custom URLs), store = referrer_list */
+                var rfInput = document.getElementById('dd-ref-input');
+                var rfAdd = document.getElementById('dd-ref-add');
+                var rfList = document.getElementById('dd-ref-selected');
+                var rfStore = document.getElementById('dd-referrer-list');
+                var rfEntered = document.getElementById('dd-ref-entered');
+                if (rfInput && rfAdd && rfList && rfStore) {
+                    // Mirrors devdredi_referrer_list(): lower case, no scheme, no path or query, no www., letters digits dots and hyphens.
+                    var rfNormalize = function (raw) {
+                        var v = (raw || '').trim().toLowerCase();
+                        v = v.replace(/^[a-z][a-z0-9+.-]*:\/\//, '').replace(/[\/?#].*$/, '').replace(/^www\./, '');
+                        return v.replace(/[^a-z0-9.\-]/g, '').replace(/^\.+|\.+$/g, '');
+                    };
+                    var rfParse = function (text) {
+                        var out = [];
+                        (text || '').split('\n').forEach(function (l) { var v = rfNormalize(l); if (v && out.indexOf(v) === -1) out.push(v); });
+                        return out;
+                    };
+                    var rfItems = rfParse(rfStore.value);
+                    // Redirects per entry: a domain sums its host and subdomains, a word every referring host containing it.
+                    var rfHits = function (entry) {
+                        if (entry.indexOf('.') !== -1) return window.ddRefCount ? window.ddRefCount(entry) : 0;
+                        var m = (window.DEVDREDI_COUNTS && window.DEVDREDI_COUNTS.referrer) || {}, t = 0;
+                        for (var h in m) { if (h.indexOf(entry) !== -1) { t += (parseInt(m[h], 10) || 0); } }
+                        return t;
+                    };
+                    var rfUpdateEntered = function () { if (rfEntered) rfEntered.textContent = rfParse(rfInput.value).length; };
+                    var rfRender = function () {
+                        rfList.innerHTML = '';
+                        rfStore.value = rfItems.join('\n');
+                        ddToggleRemoveAll('dd-ref-removeall', rfItems.length > 0);
+                        if (!rfItems.length) return;
+                        var wrap = document.createElement('div'); wrap.className = 'dd-sel-group';
+                        var head = document.createElement('div'); head.className = 'dd-sel-head'; head.textContent = 'Referring Websites (' + rfItems.length + ')';
+                        wrap.appendChild(head);
+                        rfItems.forEach(function (entry) {
+                            var row = document.createElement('div'); row.className = 'dd-sel-row';
+                            var info = document.createElement('span'); info.textContent = entry; info.style.minWidth = '0';
+                            var actions = document.createElement('span'); actions.style.display = 'flex'; actions.style.alignItems = 'center'; actions.style.gap = '12px'; actions.style.flexShrink = '0';
+                            var hits = document.createElement('span'); hits.className = 'dd-sel-hits'; hits.appendChild(document.createTextNode('Redirects: '));
+                            var hitsNum = document.createElement('span'); hitsNum.className = 'dd-sel-hits-num'; hitsNum.textContent = String(rfHits(entry)); hits.appendChild(hitsNum);
+                            var x = document.createElement('span'); x.className = 'dd-sel-x'; x.title = 'Remove'; x.textContent = 'Remove';
+                            x.addEventListener('click', function () { rfItems = rfItems.filter(function (e) { return e !== entry; }); rfRender(); });
+                            actions.appendChild(hits); actions.appendChild(x);
+                            row.appendChild(info); row.appendChild(actions);
+                            wrap.appendChild(row);
+                        });
+                        rfList.appendChild(wrap);
+                    };
+                    ddWireRemoveAll('dd-ref-removeall', function () { rfItems = []; rfRender(); });
+                    var rfAddNow = function () {
+                        rfParse(rfInput.value).forEach(function (v) { if (rfItems.indexOf(v) === -1) rfItems.push(v); });
+                        rfRender();
+                        rfInput.value = '';
+                        rfUpdateEntered();
+                    };
+                    rfAdd.addEventListener('click', function () { rfAddNow(); rfInput.focus(); });
+                    rfInput.addEventListener('input', rfUpdateEntered);
+                    // Typed but not added yet: Save keeps it instead of dropping it.
+                    if (rfInput.form) { rfInput.form.addEventListener('submit', function () { if (rfInput.value.trim()) { rfAddNow(); } }); }
+                    rfRender();
+                    rfUpdateEntered();
+                    window.DEVDREDI_REINIT.push(function () { rfItems = rfParse(rfStore.value); rfInput.value = ''; rfRender(); rfUpdateEntered(); });
                 }
 
                 /* Provided links: input + Add -> list rows (same look/logic as Custom URLs), store = links_list */
@@ -1790,23 +2084,29 @@ function devdredi_settings_page()
                             pkMark(title, it.label, q);
                             var path = document.createElement('span'); path.style.color = '#4b5563'; path.style.fontSize = '12px';
                             pkMark(path, it.value, q);
+                            // A match from another tab says which one it belongs to (the shop page shows up while Categories is open).
+                            if (it.other) { path.appendChild(document.createTextNode(' \u00b7 ' + (it.type === 'post' ? 'Post' : (it.type === 'page' ? 'Page' : 'Category')))); }
                             left.appendChild(title); left.appendChild(path);
                             var add = document.createElement('span'); add.className = 'dd-pick-add'; add.textContent = chosen ? 'Added ✓' : 'Add';
                             row.appendChild(left); row.appendChild(add);
                             row.addEventListener('click', function (e) {
                                 e.stopPropagation();
-                                if (pkHas(it.value)) { pkRemove(it.value); } else { pkAdd(it.label, it.value, pkType); }
+                                if (pkHas(it.value)) { pkRemove(it.value); } else { pkAdd(it.label, it.value, it.type || pkType); }
                                 pkRenderResults(list);
                             });
                             pkResults.appendChild(row);
                         });
                         pkResults.style.display = 'block';
                     }
+                    var pkSeq = 0;
                     function pkFetch() {
                         var q = pkSearch.value.trim();
-                        fetch(DDRM.url + '?type=' + encodeURIComponent(pkType) + '&q=' + encodeURIComponent(q), { headers: { 'X-WP-Nonce': DDRM.nonce } })
+                        // Only the newest search may fill the list: a slower reply to an older query must not replace it.
+                        var seq = ++pkSeq;
+                        // Plain permalinks give rest_url() as index.php?rest_route=..., so the query joins with & (a second ? made a 404, 1.4.2).
+                        fetch(DDRM.url + (DDRM.url.indexOf('?') === -1 ? '?' : '&') + 'type=' + encodeURIComponent(pkType) + '&q=' + encodeURIComponent(q), { headers: { 'X-WP-Nonce': DDRM.nonce } })
                             .then(function (r) { return r.json(); })
-                            .then(function (d) { pkLast = (d && d.items) ? d.items : []; pkRenderResults(pkLast); })
+                            .then(function (d) { if (seq !== pkSeq) { return; } pkLast = (d && d.items) ? d.items : []; pkRenderResults(pkLast); })
                             .catch(function () { pkResults.innerHTML = '<div class="dd-pick-empty">Search failed.</div>'; pkResults.style.display = 'block'; });
                     }
                     pkSearch.addEventListener('input', function () { clearTimeout(pkTimer); pkTimer = setTimeout(pkFetch, 250); });
@@ -1890,35 +2190,58 @@ function devdredi_settings_page()
                 <tr>
                     <th>What To Redirect</th>
                     <td>
-                        <div class="flex flex-col gap-2.5 items-start">
-                            <label style="margin-right:20px;">
-                                <input type="radio" name="what_to_redirect" value="entire_website" <?php checked(!in_array($what_to_redirect, array('selected_existing', 'custom_urls', 'all_404', 'referrer'), true)); ?>>
-                                Entire website
-                                <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Run this rule on every public page of your site.</span></span>
-                            </label>
-                            <label style="margin-right:20px;">
-                                <input type="radio" name="what_to_redirect" value="selected_existing" <?php checked($what_to_redirect === 'selected_existing'); ?>>
-                                Selected existing URLs
-                                <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Search and add pages, posts, or categories that already exist on your site.</span></span>
-                            </label>
-                            <label style="margin-right:20px;">
-                                <input type="radio" name="what_to_redirect" value="custom_urls" <?php checked($what_to_redirect === 'custom_urls'); ?>>
-                                Custom URLs
-                                <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Use this for exact URL paths, whether the page exists or not.</span></span>
-                            </label>
-                            <label style="margin-right:20px;">
-                                <input type="radio" name="what_to_redirect" value="all_404" <?php checked($what_to_redirect === 'all_404'); ?>>
-                                All 404's
-                                <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Use this when you want to redirect every not-found page on your site.</span></span>
-                            </label>
+                        <div class="flex flex-col gap-2.5 items-start" role="radiogroup" aria-label="What to redirect">
+                            <div>
+                                <label class="dd-opt"><input type="radio" name="what_to_redirect" value="entire_website" <?php checked(!in_array($what_to_redirect, array('selected_existing', 'custom_urls', 'all_404', 'referrer'), true)); ?>> Entire website</label>
+                                <p class="dd-hint">Run this rule on every public page of your site.</p>
+                            </div>
+                            <div>
+                                <label class="dd-opt"><input type="radio" name="what_to_redirect" value="selected_existing" <?php checked($what_to_redirect === 'selected_existing'); ?>> Selected existing URLs</label>
+                                <p class="dd-hint">Search and add pages, posts, or categories that already exist on your site.</p>
+                            </div>
+                            <div>
+                                <label class="dd-opt"><input type="radio" name="what_to_redirect" value="custom_urls" <?php checked($what_to_redirect === 'custom_urls'); ?>> Custom URLs</label>
+                                <p class="dd-hint">Use this for exact URL paths, whether the page exists or not.</p>
+                            </div>
+                            <div>
+                                <label class="dd-opt"><input type="radio" name="what_to_redirect" value="referrer" <?php checked($what_to_redirect === 'referrer'); ?>> Referring websites</label>
+                                <p class="dd-hint">Redirect only visitors who arrive from the websites you list. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">A domain (reddit.com) covers that site and its subdomains; a word (reddit) covers every referring site whose address contains it. Works on cached pages too.</span></span></p>
+                            </div>
+                            <div>
+                                <label class="dd-opt"><input type="radio" name="what_to_redirect" value="all_404" <?php checked($what_to_redirect === 'all_404'); ?>> All 404's</label>
+                                <p class="dd-hint">Use this when you want to redirect every not-found page on your site.</p>
+                            </div>
                         </div>
                     </td>
                 </tr>
-                <tr id="dd-row-targetpages"<?php echo (in_array($what_to_redirect, array('selected_existing', 'custom_urls'), true)) ? '' : ' style="display:none;"'; ?>>
+                <?php $ref_pick = ($what_to_redirect === 'referrer' && (int) devdredi_get_setting('referrer_only_selected', 0) === 1); ?>
+                <tr id="dd-row-referrer"<?php echo ($what_to_redirect === 'referrer') ? '' : ' style="display:none;"'; ?>>
+                    <th>Referring Websites</th>
+                    <td>
+                        <div style="display:flex; gap:8px; align-items:flex-start;">
+                            <textarea id="dd-ref-input" rows="3" class="dd-textarea" placeholder="e.g. reddit or facebook.com, one per line" autocomplete="off" style="flex:1;"></textarea>
+                            <button type="button" id="dd-ref-add" class="dd-list-addbtn">Add</button>
+                        </div>
+                        <small style="display:block;margin-top:8px;"><span id="dd-ref-entered">0</span> website(s) entered</small>
+                        <div id="dd-ref-selected" style="margin-top:10px;"></div>
+                        <div class="dd-removeall" id="dd-ref-removeall" style="display:none;">
+                            <button type="button" class="dd-removeall-btn" data-act="ask">Remove All</button>
+                            <span class="dd-removeall-confirm" data-act="confirm" style="display:none;">Remove all? <a class="yes" data-act="yes">Yes</a> / <a class="no" data-act="no">No</a></span>
+                        </div>
+                        <textarea name="referrer_list" id="dd-referrer-list" style="display:none;"><?php echo esc_textarea((string) devdredi_get_setting('referrer_list', '')); ?></textarea>
+                        <p class="dd-hint">A domain (facebook.com) matches that site and its subdomains. A word (reddit) matches any referring site whose address contains it. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">The referrer is what the visitor's browser reports. Some sites and apps send none, and those visitors are never redirected by this rule. Visitors coming from your own site never count.</span></span></p>
+                        <label style="display:block; margin-top:12px;">
+                            <input type="checkbox" name="referrer_only_selected" id="dd-ref-only-selected" value="1" <?php checked((int) devdredi_get_setting('referrer_only_selected', 0), 1); ?>>
+                            Only on selected pages
+                        </label>
+                        <p class="dd-hint">Pick the categories, pages or posts under URLs To Redirect. Visitors from these websites are redirected only there. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Unticked, the rule redirects these visitors on every page. A picked category covers every post in it and in its subcategories, a picked product category or shop archive every product in it.</span></span></p>
+                    </td>
+                </tr>
+                <tr id="dd-row-targetpages"<?php echo (in_array($what_to_redirect, array('selected_existing', 'custom_urls'), true) || $ref_pick) ? '' : ' style="display:none;"'; ?>>
                     <th>URLs To Redirect</th>
                     <td>
                         <!-- Selected existing URLs: live search picker (tabs + REST + chips) -->
-                        <div id="rm-picker-block" style="<?php echo ($what_to_redirect === 'selected_existing') ? '' : 'display:none;'; ?>">
+                        <div id="rm-picker-block" style="<?php echo ($what_to_redirect === 'selected_existing' || $ref_pick) ? '' : 'display:none;'; ?>">
                             <div style="display:flex; gap:6px; margin-bottom:8px;">
                                 <button type="button" class="dd-pick-tab is-active" data-type="category">Categories</button>
                                 <button type="button" class="dd-pick-tab" data-type="page">Pages</button>
@@ -1943,6 +2266,7 @@ function devdredi_settings_page()
                                 <button type="button" id="dd-custom-add">Add</button>
                             </div>
                             <small id="devdredi-custom-count" style="display:block;margin-top:8px;"><span id="dd-custom-count">0</span> link(s) entered</small>
+                            <p class="dd-hint">A path ending with / also covers everything under it: /blog/ redirects /blog/ and every /blog/... page. Without the slash only that exact path redirects.</p>
                             <div id="dd-custom-selected" style="margin-top:10px;"></div>
                             <div class="dd-removeall" id="dd-custom-removeall" style="display:none;">
                                 <button type="button" class="dd-removeall-btn" data-act="ask">Remove All</button>
@@ -2012,11 +2336,10 @@ function devdredi_settings_page()
                     <td>
                         <div class="flex flex-col gap-2.5 items-start">
                             <?php foreach ($rs_labels as $rsv => $rslabel): ?>
-                            <label data-rs="<?php echo esc_attr($rsv); ?>" style="margin-right:20px;<?php echo ($rsv === 'found' && $what_to_redirect === 'all_404') ? 'display:none;' : ''; ?>">
-                                <input type="radio" name="redirect_source" value="<?php echo esc_attr($rsv); ?>" <?php checked($redirect_source, $rsv); ?>>
-                                <?php echo esc_html($rslabel); ?>
-                                <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box"><?php echo esc_html($rs_hints[$rsv]); ?></span></span>
-                            </label>
+                            <div data-rs="<?php echo esc_attr($rsv); ?>"<?php echo ($rsv === 'found' && $what_to_redirect === 'all_404') ? ' style="display:none;"' : ''; ?>>
+                                <label class="dd-opt"><input type="radio" name="redirect_source" value="<?php echo esc_attr($rsv); ?>" <?php checked($redirect_source, $rsv); ?>> <?php echo esc_html($rslabel); ?></label>
+                                <p class="dd-hint"><?php echo esc_html($rs_hints[$rsv]); ?></p>
+                            </div>
                             <?php endforeach; ?>
                         </div>
                     </td>
@@ -2706,7 +3029,7 @@ function devdredi_settings_page()
                     var field_same_tab_delay_max = form.querySelector('input[name="same_tab_delay_max"]');
                     var field_open_mode = form.querySelector('[name="open_mode"]');
                     var field_fallback_mode = form.querySelector('[name="fallback_mode"]');
-                    var field_fallback_url = document.getElementById('fallback_url');
+                    var field_fallback_url = document.getElementById('dd-bypass-store'); // the hidden store that carries fallback_url
                     
                     function syncRedirectType() {
                         var selectedType = 'js';
@@ -2998,7 +3321,7 @@ function devdredi_settings_page()
                             var pct = (share * 100).toFixed(2);
                             html += '<tr>'+
                                     '<td style="text-align:left; padding: 8px 10px;">'+(i+1)+'</td>'+
-                                    '<td style="text-align:left; padding: 8px 10px;">'+links[i]+'</td>'+
+                                    '<td style="text-align:left; padding: 8px 10px;">'+String(links[i]).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; })+'</td>'+
                                     '<td style="text-align:center; padding: 8px 10px;">'+pct+'%</td>'+
                                     '<td style="text-align:center; padding: 8px 10px;">'+clicks[i]+'</td>'+
                                     '</tr>';
@@ -3658,6 +3981,7 @@ function devdredi_settings_page()
             // list-widget stores first, then reinit them
             setStore('dd-destlinks-field', s.links_list);
             setStore('dd-custom-store', s.custom_links_list);
+            var refList = document.getElementById('dd-referrer-list'); if (refList) { refList.value = s.referrer_list || ''; }
             setStore('dd-pick-store', s.selected_links_list);
             setStore('dd-pick-meta', s.selected_links_meta);
             setStore('dd-plc-store', s.page_links_contains);
@@ -3672,7 +3996,7 @@ function devdredi_settings_page()
              ['same_tab_require_click',s.same_tab_require_click],['same_tab_after_click_enabled',s.same_tab_after_click_enabled],
              ['geo_filter_enabled',s.geo_filter_enabled],['trust_proxy',s.trust_proxy],
              ['device_desktop',s.device_desktop],['device_mobile',s.device_mobile],['device_tablet',s.device_tablet],
-             ['purge_cache_on_save',s.purge_cache_on_save]
+             ['purge_cache_on_save',s.purge_cache_on_save],['referrer_only_selected',s.referrer_only_selected]
             ].forEach(function(p){ setCheck(p[0],p[1]); });
 
             // numbers

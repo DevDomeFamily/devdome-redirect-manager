@@ -401,18 +401,27 @@ function devdredi_resolve_redirect_target( $raw_url ) {
 
     $scheme = wp_parse_url( $url, PHP_URL_SCHEME );
     if ( ! in_array( $scheme, array( 'http', 'https' ), true ) ) {
-        if (strpos($raw_trimmed, '.') !== false) {
-            return $raw_trimmed;
+        // A scheme-less host (example.com/landing) becomes https; any other scheme (ftp:, javascript:) never redirects.
+        if ( strpos( $raw_trimmed, ':' ) === false && strpos( $raw_trimmed, '.' ) !== false ) {
+            $url    = esc_url_raw( 'https://' . ltrim( $raw_trimmed, '/' ) );
+            $scheme = wp_parse_url( $url, PHP_URL_SCHEME );
         }
-        return '';
+        if ( ! in_array( $scheme, array( 'http', 'https' ), true ) ) {
+            return '';
+        }
     }
 
     if ( function_exists('wp_http_validate_url') && ! wp_http_validate_url( $url ) ) return '';
 
     $parts = wp_parse_url($url);
     if (!empty($parts['host']) && function_exists('idn_to_ascii')) {
-        $parts['host'] = idn_to_ascii($parts['host'], IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46);
+        $ascii_host = idn_to_ascii($parts['host'], IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46);
+        if ($ascii_host === false || $ascii_host === '') {
+            return ''; // a host that cannot be converted never becomes a Location header
+        }
+        $parts['host'] = $ascii_host;
         $url = (isset($parts['scheme'])?$parts['scheme'].'://':'') . $parts['host']
+             . (isset($parts['port'])?':'.$parts['port']:'')
              . (isset($parts['path'])?$parts['path']:'')
              . (isset($parts['query'])?'?'.$parts['query']:'')
              . (isset($parts['fragment'])?'#'.$parts['fragment']:'');
@@ -425,10 +434,29 @@ function devdredi_resolve_redirect_target( $raw_url ) {
     return $url;
 }
 
+/** The site's home path ('/' on a root install, '/blog' on a subdirectory install): where plain-permalink addresses live. */
+function devdredi_home_path() {
+    return '/' . trim((string) wp_parse_url(home_url('/'), PHP_URL_PATH), '/');
+}
+
 function devdredi_check_url_match($pattern, $current_full_url, $current_path, $current_host) {
     if (empty($pattern)) return false;
     $item = trim($pattern);
     if ($item === "") return false;
+
+    // Plain permalinks put every page on the site root with a query (/?cat=5, /?page_id=2). Such an address matches only
+    // a request carrying the same query values; by its path alone it would match every page of the site (1.5.0).
+    if (strpos($item, '?') !== false) { // /?cat=5, /blog/?page_id=2, /landing?offer=1: the query values are part of the address
+        $want = array();
+        $have = array();
+        parse_str((string) wp_parse_url($item, PHP_URL_QUERY), $want);
+        parse_str((string) wp_parse_url($current_full_url, PHP_URL_QUERY), $have);
+        foreach ($want as $k => $v) {
+            if (!isset($have[$k]) || !is_scalar($v) || !is_scalar($have[$k]) || (string) $have[$k] !== (string) $v) {
+                return false;
+            }
+        }
+    }
 
     $is_category = (substr($item, -1) === '/');
 
@@ -452,7 +480,7 @@ function devdredi_check_url_match($pattern, $current_full_url, $current_path, $c
     $norm_host = function($h) {
         // Strip a leading "www." so a www / non-www difference between the list item and the
         // live request host never silently defeats a full-URL or bare-domain match.
-        return preg_replace('#^www\.#i', '', strtolower(trim((string) $h)));
+        return preg_replace('#:\d+$#', '', preg_replace('#^www\.#i', '', strtolower(trim((string) $h)))); // no www, no port
     };
 
     $current_host = $norm_host($current_host);
@@ -590,6 +618,7 @@ function devdredi_handle_fallback() {
             devdredi_update_setting('user_bypass_count', $bc + 1);
             devdredi_bump_daily(array('byp' => 1));
 
+            $GLOBALS['devdredi_redirecting'] = true;
             wp_redirect($fallback_url, 302); // phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect -- intentional off-site redirect; wp_safe_redirect would block external destinations.
     exit;
 }
@@ -597,14 +626,258 @@ function devdredi_handle_fallback() {
 }
 
 
+/**
+ * "Referring websites" (1.5.0): the rule's list, one entry per line, lower-cased, without scheme / www. / path.
+ * An entry WITH a dot is a domain and matches that host and every subdomain (reddit.com: old.reddit.com too).
+ * An entry WITHOUT a dot is a word and matches any referring host that contains it (reddit: reddit.com,
+ * redditmedia.com, out.reddit.com) (owner 2026-09-15: "reddit has a lot of different links, we can't find all").
+ */
+function devdredi_referrer_list($raw = null)
+{
+    $raw = null === $raw ? (string) devdredi_get_setting('referrer_list', '') : (string) $raw;
+    $out = array();
+    foreach (preg_split('/\r?\n/', $raw) as $line) {
+        $e = strtolower(trim($line));
+        $e = preg_replace('#^[a-z][a-z0-9+.-]*://#', '', $e); // scheme
+        $e = preg_replace('#[/?\#].*$#', '', $e);              // path / query
+        $e = preg_replace('#^www\.#', '', $e);
+        $e = preg_replace('#[^a-z0-9.\-]#', '', $e);
+        $e = trim($e, '.');
+        if ($e !== '') {
+            $out[$e] = 1;
+        }
+    }
+    return array_keys($out);
+}
+
+/** True when the referring host matches one list entry (domain = host or subdomain, word = contains). */
+function devdredi_referrer_entry_matches($host, $entry)
+{
+    $host  = strtolower((string) $host);
+    $entry = strtolower((string) $entry);
+    if ($host === '' || $entry === '') {
+        return false;
+    }
+    if (strpos($entry, '.') === false) {
+        return strpos($host, $entry) !== false;
+    }
+    return $host === $entry || substr($host, -(strlen($entry) + 1)) === '.' . $entry;
+}
+
+/**
+ * The referring host of this request, without www. The cache-immunity bootstrap (devdredi_print_referrer_bootstrap)
+ * re-requests a page served from a full-page cache with ?dd_rm_ref=<host>; on that request the real HTTP_REFERER is the
+ * page itself, so the carried host is honoured (it is validated against the list like any other referrer).
+ * The site's own host never counts as a referrer: internal navigation must not trigger a "reddit" word.
+ */
+function devdredi_referrer_host()
+{
+    $forced = isset($_GET['dd_rm_ref']) ? strtolower(preg_replace('#[^a-z0-9.\-]#i', '', sanitize_text_field(wp_unslash($_GET['dd_rm_ref'])))) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- public read-only redirect gate, host-validated and matched against the rule's own list
+    if ($forced !== '') {
+        $host = $forced;
+    } else {
+        $ref  = isset($_SERVER['HTTP_REFERER']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_REFERER'])) : ''; // not esc_url_raw: app referrers (android-app://com.reddit.frontpage) must keep their host
+        $host = $ref !== '' ? strtolower((string) wp_parse_url($ref, PHP_URL_HOST)) : '';
+    }
+    $host = preg_replace('#^www\.#', '', (string) $host);
+    $own  = preg_replace('#^www\.#', '', strtolower((string) wp_parse_url(home_url(), PHP_URL_HOST)));
+    if ($host === '' || $host === $own) {
+        return '';
+    }
+    return $host;
+}
+
+/** Does the current request come from one of the rule's referring websites? */
+function devdredi_referrer_matches()
+{
+    $host = devdredi_referrer_host();
+    if ($host === '') {
+        return false;
+    }
+    foreach (devdredi_referrer_list() as $entry) {
+        if (devdredi_referrer_entry_matches($host, $entry)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** True when the request matches one of the URLs picked under URLs To Redirect (selected_links_list). */
+function devdredi_selected_links_match($current_full_url, $current_path, $current_host)
+{
+    foreach (array_filter(array_map('trim', explode("\n", (string) devdredi_get_setting('selected_links_list', '')))) as $item) {
+        if (devdredi_check_url_match($item, $current_full_url, $current_path, $current_host)) {
+            return true;
+        }
+    }
+    // A picked category or shop archive also covers every post or product in it (1.5.0).
+    return devdredi_selected_groups_match();
+}
+
+/**
+ * An address of this site in comparable form: the lower-case path without the trailing slash ("/" for the root) and
+ * the query arguments. Plain permalinks put everything on the root with a query (/?cat=5, /?post_type=product), so
+ * the query is part of the identity.
+ *
+ * @return array{0: string, 1: array}
+ */
+function devdredi_group_address($url)
+{
+    $query = array();
+    parse_str((string) wp_parse_url(trim((string) $url), PHP_URL_QUERY), $query);
+    return array('/' . trim(strtolower((string) wp_parse_url(trim((string) $url), PHP_URL_PATH)), '/'), $query);
+}
+
+/**
+ * The group behind one picked address, or null: array('type', <post type>) when it is a post type archive (the
+ * WooCommerce shop), array('term', <taxonomy>, <term id>) when it is a term archive of a public taxonomy. Pages and
+ * single items are no group and keep matching by their address only.
+ */
+function devdredi_resolve_one_group($url, $archives, $taxes)
+{
+    list($path, $query) = devdredi_group_address($url);
+    foreach ($archives as $pt => $addr) {
+        if ($addr[0] === $path && $addr[1] == $query) {
+            return array('type', $pt);
+        }
+    }
+    $candidates = array();
+    if ($path !== '/') {
+        foreach ($taxes as $tax) {
+            $candidates[] = array($tax->name, get_term_by('slug', substr($path, strrpos($path, '/') + 1), $tax->name));
+        }
+    }
+    foreach ($taxes as $tax) {
+        if (!empty($tax->query_var) && isset($query[$tax->query_var]) && is_string($query[$tax->query_var])) {
+            $candidates[] = array($tax->name, get_term_by('slug', $query[$tax->query_var], $tax->name));
+        }
+    }
+    if (isset($query['cat']) && is_string($query['cat']) && ctype_digit($query['cat'])) {
+        $candidates[] = array('category', get_term((int) $query['cat'], 'category'));
+    }
+    foreach ($candidates as $c) {
+        if (!$c[1] || is_wp_error($c[1])) {
+            continue;
+        }
+        $link = get_term_link($c[1]);
+        if (is_wp_error($link)) {
+            continue;
+        }
+        $addr = devdredi_group_address($link);
+        if ($addr[0] === $path && $addr[1] == $query) {
+            return array('term', $c[0], (int) $c[1]->term_id);
+        }
+    }
+    return null;
+}
+
+/**
+ * The groups behind picked addresses (owner 2026-09-15: "if you pick the category, all posts under the category, or
+ * all products under the category"): a term archive stands for every item carrying that term or one of its child
+ * terms, a post type archive for every item of that type. Resolved when the rule is saved; the engine reads the result.
+ *
+ * @return array{terms: array, types: array}
+ */
+function devdredi_resolve_selected_groups($urls)
+{
+    $out      = array('terms' => array(), 'types' => array());
+    $archives = array();
+    foreach (get_post_types(array('public' => true, '_builtin' => false)) as $pt) {
+        $link = get_post_type_archive_link($pt);
+        if ($link) {
+            $archives[$pt] = devdredi_group_address($link);
+        }
+    }
+    $taxes = get_taxonomies(array('public' => true), 'objects');
+    foreach (array_unique(array_filter(array_map('trim', (array) $urls))) as $url) {
+        $g = devdredi_resolve_one_group($url, $archives, $taxes);
+        if ($g && $g[0] === 'type') {
+            $out['types'][] = $g[1];
+        } elseif ($g) {
+            $out['terms'][] = array($g[1], $g[2]);
+        }
+    }
+    $out['types'] = array_values(array_unique($out['types']));
+    return $out;
+}
+
+/** The current rule's picked groups: saved with the rule, resolved in memory for a rule saved before 1.5.0. */
+function devdredi_selected_groups()
+{
+    static $cache = array();
+    $rid = isset($GLOBALS['devdredi_rule']) ? (string) $GLOBALS['devdredi_rule'] : '';
+    if (isset($cache[$rid])) {
+        return $cache[$rid];
+    }
+    $saved = json_decode((string) devdredi_get_setting('selected_links_groups', ''), true);
+    if (is_array($saved) && isset($saved['terms'], $saved['types']) && is_array($saved['terms']) && is_array($saved['types'])) {
+        $cache[$rid] = $saved;
+        return $saved;
+    }
+    // Saved before 1.5.0: only the picks the picker marked as categories can be groups (a page never is).
+    $urls = array();
+    $meta = json_decode((string) devdredi_get_setting('selected_links_meta', ''), true);
+    foreach (is_array($meta) ? $meta : array() as $row) {
+        if (is_array($row) && isset($row['type'], $row['url']) && $row['type'] === 'category') {
+            $urls[] = (string) $row['url'];
+        }
+    }
+    $cache[$rid] = $urls ? devdredi_resolve_selected_groups($urls) : array('terms' => array(), 'types' => array());
+    return $cache[$rid];
+}
+
+/**
+ * True when the request is a single item inside a picked group: a post in a picked category or one of its child
+ * categories, a product in a picked product category, an item of a picked archive.
+ */
+function devdredi_selected_groups_match()
+{
+    if (!is_singular()) {
+        return false;
+    }
+    $post_id = (int) get_queried_object_id();
+    if ($post_id <= 0) {
+        return false;
+    }
+    $groups = devdredi_selected_groups();
+    if (in_array(get_post_type($post_id), $groups['types'], true)) {
+        return true;
+    }
+    foreach ($groups['terms'] as $t) {
+        if (!is_array($t) || count($t) !== 2 || !taxonomy_exists((string) $t[0])) {
+            continue;
+        }
+        $ids = array((int) $t[1]);
+        if (is_taxonomy_hierarchical((string) $t[0])) {
+            $kids = get_term_children((int) $t[1], (string) $t[0]);
+            if (is_array($kids)) {
+                $ids = array_merge($ids, array_map('intval', $kids));
+            }
+        }
+        if (has_term($ids, (string) $t[0], $post_id)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /** Does the CURRENT (active) rule's "What To Redirect" condition match this request? (No side effects.) */
 function devdredi_request_matches_rule($current_full_url, $current_path, $current_host)
 {
     $what = devdredi_get_setting('what_to_redirect', 'entire_website');
 
-    if ($what === 'selected_existing' || $what === 'custom_urls') {
-        $list_key = ($what === 'custom_urls') ? 'custom_links_list' : 'selected_links_list';
-        $items = array_filter(array_map('trim', explode("\n", devdredi_get_setting($list_key, ''))));
+    if ($what === 'referrer') {
+        // "Only on selected pages" (1.5.0) narrows the rule to the URLs picked under URLs To Redirect.
+        return devdredi_referrer_matches() && (!devdredi_get_bool_setting('referrer_only_selected', 0) || devdredi_selected_links_match($current_full_url, $current_path, $current_host));
+    }
+
+    if ($what === 'selected_existing') {
+        // The picked addresses, and the posts or products inside a picked category or shop archive (1.5.0).
+        return devdredi_selected_links_match($current_full_url, $current_path, $current_host);
+    }
+
+    if ($what === 'custom_urls') {
+        $items = array_filter(array_map('trim', explode("\n", devdredi_get_setting('custom_links_list', ''))));
         foreach ($items as $item) {
             if (devdredi_check_url_match($item, $current_full_url, $current_path, $current_host)) {
                 return true;
@@ -704,13 +977,17 @@ add_action('template_redirect', function(){
     // Gate by "What To Redirect". ONLY the chosen mode's data is honored — lists saved for
     // the OTHER modes are ignored on this request.
     if ($what_to_redirect === 'selected_existing' || $what_to_redirect === 'custom_urls') {
-        $list_key = ($what_to_redirect === 'custom_urls') ? 'custom_links_list' : 'selected_links_list';
-        $items = array_filter(array_map('trim', explode("\n", devdredi_get_setting($list_key, ''))));
-        $matched = false;
-        foreach ($items as $item) {
-            if (devdredi_check_url_match($item, $current_full_url, $current_path, $current_host)) {
-                $matched = true;
-                break;
+        if ($what_to_redirect === 'selected_existing') {
+            // The picked addresses, and the posts or products inside a picked category or shop archive (1.5.0).
+            $matched = devdredi_selected_links_match($current_full_url, $current_path, $current_host);
+        } else {
+            $items = array_filter(array_map('trim', explode("\n", devdredi_get_setting('custom_links_list', ''))));
+            $matched = false;
+            foreach ($items as $item) {
+                if (devdredi_check_url_match($item, $current_full_url, $current_path, $current_host)) {
+                    $matched = true;
+                    break;
+                }
             }
         }
         if (!$matched) {
@@ -721,6 +998,14 @@ add_action('template_redirect', function(){
     } elseif ($what_to_redirect === 'all_404') {
         // Only requests that resolve to a 404 / not-found page.
         if (!is_404()) {
+            devdredi_track_visit($current_full_url);
+            $devdredi_redirect_tracking_done = true;
+            return;
+        }
+    } elseif ($what_to_redirect === 'referrer') {
+        // Only visitors arriving from one of the rule's referring websites (1.5.0), and with "Only on selected pages"
+        // ticked only on the URLs picked under URLs To Redirect.
+        if (!devdredi_referrer_matches() || (devdredi_get_bool_setting('referrer_only_selected', 0) && !devdredi_selected_links_match($current_full_url, $current_path, $current_host))) {
             devdredi_track_visit($current_full_url);
             $devdredi_redirect_tracking_done = true;
             return;
@@ -1038,6 +1323,7 @@ add_action('template_redirect', function(){
         }
 
         $status = (int) $redirect_type; // 301/302/307/308
+        $GLOBALS['devdredi_redirecting'] = true;
         wp_redirect($target, $status); // phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect -- intentional off-site redirect; wp_safe_redirect would block external destinations.
         exit;
     } else {
@@ -1329,6 +1615,9 @@ add_action('template_redirect', function(){
 
 
 add_filter('allowed_redirect_hosts', function($hosts){
+    if (empty($GLOBALS['devdredi_redirecting'])) {
+        return $hosts; // only while THIS plugin issues its redirect: never widen other code's wp_safe_redirect()
+    }
     $external_hosts = [
         'google.com', 'google.ru', 'yandex.ru', 'bing.com', 'duckduckgo.com',
         'yahoo.com', 'baidu.com', 'ask.com', 'aol.com', 'startpage.com',
@@ -1393,3 +1682,75 @@ function devdredi_set_custom_domains($list){
     return $clean;
 }
 
+
+/**
+ * Cache immunity for "Referring websites" rules (1.5.0, ported from the fleet build): a page served from a full-page
+ * cache never ran the engine, so a tiny footer script checks document.referrer against the running rules' lists and,
+ * on a hit, reloads once with ?dd_rm_ref=<host>; that request bypasses the cache key and the engine decides. Pages
+ * targeted this way stay cacheable (the engine's no-store immunity is not applied for referrer rules).
+ * @return string[] the referrer entries of every running referrer rule (empty = nothing to print)
+ */
+function devdredi_referrer_engines_for_running_rules()
+{
+    $saved = isset($GLOBALS['devdredi_rule']) ? $GLOBALS['devdredi_rule'] : null;
+    $out   = array();
+    $host  = sanitize_text_field(wp_unslash($_SERVER['HTTP_HOST'] ?? ''));
+    $path  = sanitize_text_field(wp_unslash($_SERVER['REQUEST_URI'] ?? ''));
+    $full  = (is_ssl() ? 'https://' : 'http://') . $host . $path;
+    foreach (devdredi_get_rules() as $r) {
+        if (empty($r['id'])) {
+            continue;
+        }
+        $GLOBALS['devdredi_rule'] = $r['id'];
+        if (devdredi_get_setting('plugin_state', 'stopped') !== 'running' || devdredi_get_setting('what_to_redirect', 'entire_website') !== 'referrer') {
+            continue;
+        }
+        // Out-of-schedule rules still print it: a copy cached off-hours must carry it for the redirect to work once the
+        // schedule resumes (the reload re-runs the engine, which checks the schedule live). Only an ended campaign is skipped.
+        if (devdredi_schedule_permanently_over()) {
+            continue;
+        }
+        if (devdredi_get_bool_setting('referrer_only_selected', 0) && !devdredi_selected_links_match($full, $path, $host)) {
+            continue; // "Only on selected pages" and this page is not one of them
+        }
+        foreach (devdredi_referrer_list() as $e) {
+            $out[$e] = 1;
+        }
+    }
+    $GLOBALS['devdredi_rule'] = $saved;
+    return array_keys($out);
+}
+
+function devdredi_print_referrer_bootstrap()
+{
+    if (is_admin() || is_feed() || is_robots() || (defined('REST_REQUEST') && REST_REQUEST)) {
+        return;
+    }
+    if (!empty($GLOBALS['devdredi_rule'])) {
+        return; // the engine handled this render server-side (that response is never cached)
+    }
+    $engines = devdredi_referrer_engines_for_running_rules();
+    if (empty($engines)) {
+        return;
+    }
+    // Enqueued as an inline script on an empty footer handle (the WordPress.org way), not a raw <script> tag.
+    $js = <<<'JS'
+(function(){try{
+  var sp=new URLSearchParams(location.search);
+  if(sp.has('dd_rm_ref')){sp.delete('dd_rm_ref');var c=location.pathname+(sp.toString()?('?'+sp.toString()):'')+location.hash;try{history.replaceState(null,document.title,c);}catch(e){}return;}
+  var ref=document.referrer||'';if(!ref)return;
+  var h=new URL(ref).hostname.replace(/^www\./,'').toLowerCase();
+  if(!h||h===location.hostname.replace(/^www\./,'').toLowerCase())return;
+  var E=__DEVDREDI_ENGINES__;
+  var hit=E.some(function(d){return d.indexOf('.')===-1?h.indexOf(d)!==-1:(h===d||h.slice(-(d.length+1))==='.'+d);});
+  if(!hit)return;
+  var u=new URL(location.href);u.searchParams.set('dd_rm_ref',h);
+  location.replace(u.toString());
+}catch(e){}})();
+JS;
+    $js = str_replace('__DEVDREDI_ENGINES__', wp_json_encode(array_values($engines)), $js);
+    wp_register_script('devdredi-referrer-bootstrap', false, array(), DEVDREDI_VERSION, true);
+    wp_enqueue_script('devdredi-referrer-bootstrap');
+    wp_add_inline_script('devdredi-referrer-bootstrap', $js);
+}
+add_action('wp_enqueue_scripts', 'devdredi_print_referrer_bootstrap', 99);

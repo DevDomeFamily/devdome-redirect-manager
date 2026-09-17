@@ -12,6 +12,12 @@ if (!defined('DEVDREDI_GEO_ENDPOINT')) {
 }
 
 /** Resolve an IP to an ISO-3166-1 alpha-2 country code (or false). Cached per IP. */
+/** A country is exactly two letters (ISO 3166-1 alpha-2); anything else the service returns counts as Unknown. */
+function devdredi_geo_code($raw) {
+    $c = strtoupper(trim((string) $raw));
+    return preg_match('/^[A-Z]{2}$/', $c) ? $c : 'Unknown';
+}
+
 function devdredi_get_country_by_ip($ip)
 {
     $ip = trim((string) $ip);
@@ -23,6 +29,10 @@ function devdredi_get_country_by_ip($ip)
     $cached = get_transient($cache_key);
     if ($cached !== false) {
         return $cached === '0' ? false : $cached;
+    }
+
+    if (get_transient('devdredi_geo_error')) {
+        return false; // the service failed within the last 5 minutes: no repeated 5-second waits per visitor
     }
 
     $resp = wp_remote_post(DEVDREDI_GEO_ENDPOINT . '/resolve', array(
@@ -38,7 +48,7 @@ function devdredi_get_country_by_ip($ip)
 
     $data = json_decode(wp_remote_retrieve_body($resp), true);
     $country = (is_array($data) && !empty($data['country']))
-        ? strtoupper(sanitize_text_field($data['country']))
+        ? devdredi_geo_code(sanitize_text_field($data['country']))
         : false;
 
     if ($country) {

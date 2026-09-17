@@ -23,6 +23,12 @@ function devdredi_activate()
         UNIQUE KEY setting_name (setting_name)
     ) $charset_collate;";
 
+    // Self-hosted builds: move the legacy-prefix table first. Activation runs after plugins_loaded, so
+    // without this the empty new table would be created first and the rename skipped for good.
+    if (function_exists('devdredi_maybe_migrate')) {
+        devdredi_maybe_migrate();
+    }
+
     require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
     dbDelta($sql);
 
