@@ -12,7 +12,7 @@ function devdredi_reset_stats()
     $GLOBALS['devdredi_write_failed'] = false;
     $keys = array(
         'visitor_count', 'page_view_count', 'ip_list', 'ua_list', 'uu_list', 'ip_link_index',
-        'ip_redirected_once', 'last_redirects', 'user_redirects_count', 'user_bypass_count',
+        'ip_redirected_once', 'last_redirects', 'user_redirects_count', 'user_bypass_count', 'user_bot_skip_count',
         'unique_visitor_count', 'unique_users_count',
         'rc_by_source', 'rc_by_dest', 'rc_by_referrer', 'rc_by_country', 'rc_by_found',
         'device_count_desktop', 'device_count_mobile', 'device_count_tablet',
@@ -80,7 +80,7 @@ function devdredi_bump_daily($incs, $cc = '')
     if (!is_array($map)) { $map = array(); }
     $today = current_time('Y-m-d');
     if (!isset($map[$today]) || !is_array($map[$today])) {
-        $map[$today] = array('red'=>0,'byp'=>0,'dd'=>0,'dm'=>0,'dt'=>0,'cc'=>array());
+        $map[$today] = array('red'=>0,'byp'=>0,'bs'=>0,'dd'=>0,'dm'=>0,'dt'=>0,'cc'=>array());
     }
     foreach ($incs as $k => $n) {
         $map[$today][$k] = (isset($map[$today][$k]) ? (int) $map[$today][$k] : 0) + (int) $n;

@@ -4,7 +4,7 @@ Tags: redirect, redirects, link rotator, geotargeting, 301 redirect
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.5.0
+Stable tag: 1.5.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -26,6 +26,7 @@ Every feature is free and unlimited: unlimited rules, geo targeting, device targ
 * Rotate through multiple destinations in order (first to last), randomly, or with a weighted "click distribution" you control with a slider.
 * Control how often a visitor is redirected: every visit, once per visitor, or again only after a delay you set (minutes/hours/days). Recognise a returning visitor by IP, or by IP + browser/device.
 * Redirect only every N-th unique visitor.
+* Known bots are never redirected: crawlers, monitors and scrapers see the page as usual and only real visitors are redirected (on by default, one checkbox to turn off).
 * Open the destination in the same tab or a new tab (JavaScript method), with optional instant or randomized delays, and an optional "wait for a click" step.
 * Target by device: desktop, mobile, tablet.
 * Target by country with an optional geo filter (include only listed countries, or redirect everyone except listed countries).
@@ -55,6 +56,8 @@ Every feature is free and unlimited: unlimited rules, geo targeting, device targ
 **Link rotation** (provided links) - First to last, Random, or Weighted distribution. The weighted mode adds a Click Distribution slider (first link gets most, even split, or last link gets most) with a live preview. "Repeat List" starts again from the first URL once the list is exhausted.
 
 **How often to redirect** - Every visit, Once per visitor, or After a delay. When it is not "every visit", you choose how a returning visitor is identified (IP address, or IP + browser/device), can redirect only every N-th unique visitor, and (for the delay option) set the gap before the same visitor is redirected again.
+
+**Known Bots** - "Don't redirect known bots" (on by default) keeps crawlers, monitors and scrapers on the page; only real visitors are redirected, so a search engine keeps indexing the page. The check uses a built-in list of user-agent tokens; no external service is called.
 
 = Open Link Settings =
 
@@ -110,6 +113,9 @@ Yes. Rules are independent and ordered by priority. For a given request, the hig
 
 = What does "Once per visitor" mean? =
 The visitor is redirected the first time only, and then left on the page on later visits, until you reset the rule's stats. Choose "After a delay" instead if you want the redirect to become available again after a set time. A visitor is identified by IP, or by IP + browser/device.
+
+= Are search engines and other bots redirected? =
+Not while "Don't redirect known bots" is ticked, which is the default. Crawlers, uptime monitors, scrapers and headless browsers are recognised by a built-in list of user-agent tokens (plus Spamhaus DROP addresses where the shared DevDome bot data is already present on the site; this build downloads none) and simply see the page. They are not redirected, not sent to the bypass link and not counted as visitors; the rule statistics show how many were skipped. Untick it if you really want bots redirected too.
 
 = Why is "New Tab" greyed out / reverting to "Same Tab"? =
 New-tab opening needs the JavaScript method. With a 301/302/307/308 or Meta Refresh method the redirect always happens in the same tab.
@@ -172,6 +178,9 @@ Those two build inputs are not included in the distributed package. Ask for them
 5. Scheduling: run a redirect rule between dates and times in your timezone.
 
 == Changelog ==
+
+= 1.5.1 =
+* New "Don't redirect known bots" checkbox under How Often To Redirect, on by default: crawlers, monitors and scrapers see the page as usual and are never redirected, so a search engine keeps indexing the page while only real visitors are sent on. Skipped bots are not counted as visitors and appear as Bots Skipped in the rule statistics. The create-redirect and update-redirect abilities accept skip_bots and get-redirect returns it together with bots_skipped.
 
 = 1.5.0 =
 * What To Redirect: every option now carries a one-line hint under it, so the choice is clear without opening the info icon.

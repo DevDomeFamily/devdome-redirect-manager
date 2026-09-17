@@ -50,7 +50,7 @@ function devdredi_rule_editable_defaults()
         'open_mode' => 'same_tab', 'same_tab_delay_min' => 0, 'same_tab_delay_max' => 0, 'new_tab_delay_min' => 0, 'new_tab_delay_max' => 0,
         'after_click_enabled' => 0, 'after_click_min' => 0, 'after_click_max' => 0, 'same_tab_require_click' => 0,
         'same_tab_after_click_enabled' => 0, 'same_tab_after_click_min' => 0, 'same_tab_after_click_max' => 0,
-        'run_once' => 'ip', 'open_on_every' => 1, 'revisit_delay' => 0, 'revisit_delay_unit' => 'minutes', 'runtime_minutes' => 0,
+        'run_once' => 'ip', 'open_on_every' => 1, 'revisit_delay' => 0, 'revisit_delay_unit' => 'minutes', 'skip_bots' => 1, 'runtime_minutes' => 0,
         'run_mode' => 'unlimited', 'schedule_timezone' => '', 'geo_filter_enabled' => 0, 'geo_filter_mode' => 'whitelist',
         'geo_filter_whitelist' => '', 'geo_filter_blacklist' => '', 'trust_proxy' => 0,
         'device_desktop' => 1, 'device_mobile' => 1, 'device_tablet' => 1, 'purge_cache_on_save' => 1,
@@ -100,7 +100,7 @@ function devdredi_render_rule_rows($rm_rules, $rm_active, $rm_base, $rm_nonce)
                         if (!is_array($cc_map)) { $cc_map = array(); }
                         arsort($cc_map);
                         $life = array(
-                            'red' => (int) $su('user_redirects_count', 0), 'byp' => (int) $su('user_bypass_count', 0),
+                            'red' => (int) $su('user_redirects_count', 0), 'byp' => (int) $su('user_bypass_count', 0), 'bs' => (int) $su('user_bot_skip_count', 0),
                             'dd' => (int) $su('device_count_desktop', 0),
                             'dm' => (int) $su('device_count_mobile', 0), 'dt' => (int) $su('device_count_tablet', 0),
                             'uu' => (int) $su('unique_users_count', 0), 'ip' => (is_array($ip_l) ? count($ip_l) : 0), 'cc' => $cc_map,
@@ -139,6 +139,7 @@ function devdredi_render_rule_rows($rm_rules, $rm_active, $rm_base, $rm_nonce)
                                 <span class="dd-pm-uniq">Unique Users: <span class="dd-pm" data-m="uu" style="<?php echo esc_attr( $pm ); ?>"><?php echo (int) $life['uu']; ?></span></span>
                                 <span class="dd-pm-uniq">Unique IPs: <span class="dd-pm" data-m="ip" style="<?php echo esc_attr( $pm ); ?>"><?php echo (int) $life['ip']; ?></span></span>
                                 <span>Bypassed: <span class="dd-pm" data-m="byp" style="<?php echo esc_attr( $pm ); ?>"><?php echo (int) $life['byp']; ?></span></span>
+                                <span>Bots Skipped: <span class="dd-pm" data-m="bs" style="<?php echo esc_attr( $pm ); ?>"><?php echo (int) $life['bs']; ?></span></span>
                                 <span>Desktop: <span class="dd-pm" data-m="dd" style="<?php echo esc_attr( $pm ); ?>"><?php echo (int) $life['dd']; ?></span></span>
                                 <span>Mobile: <span class="dd-pm" data-m="dm" style="<?php echo esc_attr( $pm ); ?>"><?php echo (int) $life['dm']; ?></span></span>
                                 <span>Tablet: <span class="dd-pm" data-m="dt" style="<?php echo esc_attr( $pm ); ?>"><?php echo (int) $life['dt']; ?></span></span>
@@ -969,6 +970,7 @@ function devdredi_settings_page()
         devdredi_update_setting('open_on_every', $open_on_every);
         devdredi_update_setting('revisit_delay', $revisit_delay);
         devdredi_update_setting('revisit_delay_unit', $revisit_delay_unit);
+        devdredi_update_setting('skip_bots', isset($_POST['skip_bots']) ? 1 : 0);
 
         foreach (array('device_desktop', 'device_mobile', 'device_tablet') as $dk) {
             devdredi_update_setting($dk, isset($_POST[$dk]) ? 1 : 0);
@@ -1119,6 +1121,7 @@ function devdredi_settings_page()
             'device_tablet' => 1,
             'purge_cache_on_save' => 1,
             'revisit_delay' => 0,
+            'skip_bots' => 1,
             'geo_filter_country_codes' => '',
             'geo_filter_mode' => 'whitelist',
             'geo_filter_whitelist' => '',
@@ -1177,6 +1180,7 @@ function devdredi_settings_page()
     $same_tab_after_click_min = (float) devdredi_get_setting('same_tab_after_click_min', 0);
     $same_tab_after_click_max = (float) devdredi_get_setting('same_tab_after_click_max', 0);
     $run_once = devdredi_get_setting('run_once', 'ip');
+    $skip_bots = (int) devdredi_get_setting('skip_bots', 1);
     $plugin_state = devdredi_get_setting('plugin_state', 'stopped');
 
     if ($run_once === 'never') {
@@ -1444,11 +1448,11 @@ function devdredi_settings_page()
                 function cutoff(n){ var d=new Date(TODAY+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()-(n-1)); return d.toISOString().slice(0,10); }
                 function computeRange(stats, range){
                     if (range==='all' || !stats.daily) return Object.assign({}, stats.life);
-                    var from=cutoff(parseInt(range,10)||1), o={red:0,byp:0,dd:0,dm:0,dt:0,cc:{}};
+                    var from=cutoff(parseInt(range,10)||1), o={red:0,byp:0,bs:0,dd:0,dm:0,dt:0,cc:{}};
                     Object.keys(stats.daily).forEach(function(day){
                         if (day < from) return;
                         var b=stats.daily[day]||{};
-                        ['red','byp','dd','dm','dt'].forEach(function(k){ o[k]+=(parseInt(b[k],10)||0); });
+                        ['red','byp','bs','dd','dm','dt'].forEach(function(k){ o[k]+=(parseInt(b[k],10)||0); });
                         var cc=b.cc||{}; for (var c in cc){ o.cc[c]=(o.cc[c]||0)+(parseInt(cc[c],10)||0); }
                     });
                     o.uu=stats.life.uu; o.ip=stats.life.ip; // uniques are all-time only
@@ -2530,6 +2534,16 @@ function devdredi_settings_page()
                             </div>
                         </div>
                         <p class="dd-hint">Time before the same visitor can be redirected again. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Time gap before the same visitor can be redirected again.</span></span></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th>Known Bots</th>
+                    <td>
+                        <label>
+                            <input type="checkbox" name="skip_bots" value="1" <?php checked($skip_bots, 1); ?>>
+                            Don't redirect known bots
+                        </label>
+                        <p class="dd-hint">Crawlers, monitors and scrapers see the page as usual; only real visitors are redirected. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Recognised by a built-in list of user-agent tokens (search engine crawlers, uptime monitors, scrapers, headless browsers), plus Spamhaus DROP addresses where the shared DevDome bot data is present on the site. A skipped bot is not redirected, not sent to the bypass link and not counted as a visitor. Keep it on so search engines keep indexing the page.</span></span></p>
                     </td>
                 </tr>
 
@@ -3996,7 +4010,7 @@ function devdredi_settings_page()
              ['same_tab_require_click',s.same_tab_require_click],['same_tab_after_click_enabled',s.same_tab_after_click_enabled],
              ['geo_filter_enabled',s.geo_filter_enabled],['trust_proxy',s.trust_proxy],
              ['device_desktop',s.device_desktop],['device_mobile',s.device_mobile],['device_tablet',s.device_tablet],
-             ['purge_cache_on_save',s.purge_cache_on_save],['referrer_only_selected',s.referrer_only_selected]
+             ['purge_cache_on_save',s.purge_cache_on_save],['referrer_only_selected',s.referrer_only_selected],['skip_bots',s.skip_bots]
             ].forEach(function(p){ setCheck(p[0],p[1]); });
 
             // numbers

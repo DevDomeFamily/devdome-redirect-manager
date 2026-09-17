@@ -463,7 +463,7 @@ function devdredi_io_excluded_suffixes()
 {
     return array(
         'visitor_count', 'page_view_count', 'ip_list', 'ua_list', 'ip_link_index', 'ip_redirected_once',
-        'last_redirects', 'user_redirects_count', 'user_bypass_count', 'unique_visitor_count',
+        'last_redirects', 'user_redirects_count', 'user_bypass_count', 'user_bot_skip_count', 'unique_visitor_count',
         'unique_users_count', 'rc_by_source', 'rc_by_dest', 'rc_by_referrer', 'rc_by_country', 'rc_by_found',
         'device_count_desktop', 'device_count_mobile', 'device_count_tablet',
         'reset_count', 'plugin_state', 'start_time', 'stats_daily', 'uu_list',

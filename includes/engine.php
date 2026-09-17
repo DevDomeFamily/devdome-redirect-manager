@@ -1029,6 +1029,17 @@ add_action('template_redirect', function(){
         return;
     }
 
+    // Don't redirect known bots (1.5.1, on by default): crawlers, monitors and scrapers get the page
+    // as usual - no redirect, no fallback - and never count as visitors: not for the N-th visitor or
+    // once-per-visitor logic and not in the page-view / unique-user statistics. Only real visitors reach the redirect below.
+    if (devdredi_get_bool_setting('skip_bots', 1) && devdredi_is_known_bot()) {
+        $bs = (int) devdredi_get_setting('user_bot_skip_count', 0);
+        if (empty($GLOBALS['devdredi_read_failed'])) { devdredi_update_setting('user_bot_skip_count', $bs + 1); }
+        devdredi_bump_daily(array('bs' => 1));
+        $devdredi_redirect_tracking_done = true; // not a visitor: no page view, no unique-user entry
+        return;
+    }
+
     $run_once = devdredi_get_setting('run_once', 'never');
     $visitor_key = devdredi_get_visitor_key();
     $visitor_id = '';

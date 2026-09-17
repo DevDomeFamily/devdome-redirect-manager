@@ -121,6 +121,7 @@ function devdredi_ability_rule_spec_properties()
         'every_nth_visitor' => array('type' => 'integer', 'minimum' => 1, 'description' => '1 = every eligible visitor, N = only every Nth unique visitor (needs once_per ip or ip_ua).'),
         'revisit_delay' => array('type' => 'integer', 'minimum' => 0, 'description' => 'Redirect the same visitor again after this delay; 0 = once only (needs once_per ip or ip_ua).'),
         'revisit_delay_unit' => array('type' => 'string', 'enum' => array('minutes', 'hours', 'days')),
+        'skip_bots' => array('type' => 'boolean', 'description' => 'true (default) = known bots such as crawlers, monitors and scrapers are never redirected and see the page as usual, only real visitors are redirected; false = bots are treated like any visitor.'),
         'schedule_mode' => array('type' => 'string', 'enum' => array('always', 'custom'), 'description' => 'always = active whenever running; custom = only inside the schedule below.'),
         'schedule_timezone' => array('type' => 'string', 'description' => 'IANA timezone, for example Europe/Berlin; empty = the site timezone.'),
         'schedule_start_date' => array('type' => 'string', 'description' => 'YYYY-MM-DD, empty = no start date.'),
@@ -308,6 +309,7 @@ function devdredi_ability_format_rule($r, $with_maps = false)
         'every_nth_visitor' => max(1, (int) $rs('open_on_every', 1)),
         'revisit_delay' => (int) round($rev / $div),
         'revisit_delay_unit' => $unit,
+        'skip_bots' => (bool) $rs('skip_bots', 1),
         'schedule_mode' => (string) $rs('run_mode', 'unlimited') === 'set_time' ? 'custom' : 'always',
         'schedule_timezone' => (string) $rs('schedule_timezone', ''),
         'schedule_start_date' => (string) $rs('schedule_start_date', ''),
@@ -327,6 +329,7 @@ function devdredi_ability_format_rule($r, $with_maps = false)
         'stats' => array(
             'redirects'       => (int) $rs('user_redirects_count', 0),
             'bypassed'        => (int) $rs('user_bypass_count', 0),
+            'bots_skipped'    => (int) $rs('user_bot_skip_count', 0),
             'page_views'      => (int) $rs('page_view_count', 0),
             'unique_visitors' => is_array($ip_list) ? count($ip_list) : 0,
             'unique_users'    => (int) $rs('unique_users_count', 0),
@@ -361,7 +364,7 @@ function devdredi_ability_format_rule($r, $with_maps = false)
                         $cc[] = array('key' => (string) $k, 'count' => (int) $n);
                     }
                 }
-                $days[] = array('date' => (string) $day, 'redirects' => (int) ($d['red'] ?? 0), 'bypassed' => (int) ($d['byp'] ?? 0), 'desktop' => (int) ($d['dd'] ?? 0), 'mobile' => (int) ($d['dm'] ?? 0), 'tablet' => (int) ($d['dt'] ?? 0), 'countries' => $cc);
+                $days[] = array('date' => (string) $day, 'redirects' => (int) ($d['red'] ?? 0), 'bypassed' => (int) ($d['byp'] ?? 0), 'bots_skipped' => (int) ($d['bs'] ?? 0), 'desktop' => (int) ($d['dd'] ?? 0), 'mobile' => (int) ($d['dm'] ?? 0), 'tablet' => (int) ($d['dt'] ?? 0), 'countries' => $cc);
             }
         }
         $out['stats']['by_source']      = $by('rc_by_source');
@@ -524,6 +527,9 @@ function devdredi_ability_apply_spec($rid, $spec, $all)
     }
     if ($has('rotation_repeat')) {
         $ws('links_repeat', !empty($get('rotation_repeat', true)) ? 1 : 0);
+    }
+    if ($has('skip_bots')) {
+        $ws('skip_bots', !empty($get('skip_bots', true)) ? 1 : 0);
     }
     if ($has('weighted_spread')) {
         $ws('descending_spread', max(0.0, min(1.0, (float) $get('weighted_spread', 0.5))));
@@ -771,11 +777,11 @@ function devdredi_register_abilities()
     $spec = devdredi_ability_rule_spec_properties();
     $kv = array('type' => 'array', 'items' => array('type' => 'object', 'properties' => array('key' => array('type' => 'string'), 'count' => array('type' => 'integer'))));
     $stats_props = array(
-        'redirects' => array('type' => 'integer'), 'bypassed' => array('type' => 'integer'), 'page_views' => array('type' => 'integer'),
+        'redirects' => array('type' => 'integer'), 'bypassed' => array('type' => 'integer'), 'bots_skipped' => array('type' => 'integer'), 'page_views' => array('type' => 'integer'),
         'unique_visitors' => array('type' => 'integer'), 'unique_users' => array('type' => 'integer'),
         'desktop' => array('type' => 'integer'), 'mobile' => array('type' => 'integer'), 'tablet' => array('type' => 'integer'), 'reset_count' => array('type' => 'integer'),
         'by_source' => $kv, 'by_destination' => $kv, 'by_referrer' => $kv, 'by_country' => $kv, 'by_found_link' => $kv,
-        'daily' => array('type' => 'array', 'items' => array('type' => 'object', 'properties' => array('date' => array('type' => 'string'), 'redirects' => array('type' => 'integer'), 'bypassed' => array('type' => 'integer'), 'desktop' => array('type' => 'integer'), 'mobile' => array('type' => 'integer'), 'tablet' => array('type' => 'integer'), 'countries' => $kv))),
+        'daily' => array('type' => 'array', 'items' => array('type' => 'object', 'properties' => array('date' => array('type' => 'string'), 'redirects' => array('type' => 'integer'), 'bypassed' => array('type' => 'integer'), 'bots_skipped' => array('type' => 'integer'), 'desktop' => array('type' => 'integer'), 'mobile' => array('type' => 'integer'), 'tablet' => array('type' => 'integer'), 'countries' => $kv))),
     );
     $rule_props = array_merge(
         array(
@@ -818,7 +824,7 @@ function devdredi_register_abilities()
 
     $reg('devdome-redirect-manager/get-redirect-stats', __('Get redirect statistics', 'devdome-redirect-manager'),
         __('Get redirect statistics for this WordPress site: total redirects, bypassed visits, page views, unique visitors and device split across all rules, the same numbers per rule, and how many rules are running. Read only.', 'devdome-redirect-manager'),
-        $empty_input, array('type' => 'object', 'properties' => array('rules_total' => array('type' => 'integer'), 'rules_running' => array('type' => 'integer'), 'totals' => array('type' => 'object', 'properties' => array('redirects' => array('type' => 'integer'), 'bypassed' => array('type' => 'integer'), 'page_views' => array('type' => 'integer'), 'unique_visitors' => array('type' => 'integer', 'description' => 'Distinct visitors across all rules, deduplicated.'), 'desktop' => array('type' => 'integer'), 'mobile' => array('type' => 'integer'), 'tablet' => array('type' => 'integer'))), 'per_rule' => array('type' => 'array', 'items' => array('type' => 'object', 'properties' => array('id' => array('type' => 'string'), 'name' => array('type' => 'string'), 'state' => array('type' => 'string'), 'what' => array('type' => 'string'), 'method' => array('type' => 'string'), 'stats' => array('type' => 'object', 'properties' => $brief_props['stats']['properties'])))))), 'devdredi_ability_stats', 'read');
+        $empty_input, array('type' => 'object', 'properties' => array('rules_total' => array('type' => 'integer'), 'rules_running' => array('type' => 'integer'), 'totals' => array('type' => 'object', 'properties' => array('redirects' => array('type' => 'integer'), 'bypassed' => array('type' => 'integer'), 'bots_skipped' => array('type' => 'integer'), 'page_views' => array('type' => 'integer'), 'unique_visitors' => array('type' => 'integer', 'description' => 'Distinct visitors across all rules, deduplicated.'), 'desktop' => array('type' => 'integer'), 'mobile' => array('type' => 'integer'), 'tablet' => array('type' => 'integer'))), 'per_rule' => array('type' => 'array', 'items' => array('type' => 'object', 'properties' => array('id' => array('type' => 'string'), 'name' => array('type' => 'string'), 'state' => array('type' => 'string'), 'what' => array('type' => 'string'), 'method' => array('type' => 'string'), 'stats' => array('type' => 'object', 'properties' => $brief_props['stats']['properties'])))))), 'devdredi_ability_stats', 'read');
 
     $reg('devdome-redirect-manager/find-404-redirect-candidates', __('Find 404 paths worth redirecting', 'devdome-redirect-manager'),
         __('Find the missing pages (404 errors) on this WordPress site that real human visitors hit most, each with a suggested redirect target matched against the site\'s real page slugs, so you can create redirects for them. Needs DevDome Link Monitor active on the site (it records the 404 log). Read only.', 'devdome-redirect-manager'),
@@ -909,7 +915,7 @@ function devdredi_ability_details($input = array())
 
 function devdredi_ability_stats($input = array())
 {
-    $totals = array('redirects' => 0, 'bypassed' => 0, 'page_views' => 0, 'unique_visitors' => 0, 'desktop' => 0, 'mobile' => 0, 'tablet' => 0);
+    $totals = array('redirects' => 0, 'bypassed' => 0, 'bots_skipped' => 0, 'page_views' => 0, 'unique_visitors' => 0, 'desktop' => 0, 'mobile' => 0, 'tablet' => 0);
     $per = array();
     $running = 0;
     $seen = array();
@@ -1046,7 +1052,7 @@ function devdredi_ability_create($input = array())
         'rotation' => 'sequential', 'rotation_repeat' => true, 'weighted_spread' => 0.5, 'weighted_seed' => 0,
         'open_mode' => 'same_tab', 'same_tab_delay' => array(0, 0), 'new_tab_delay' => array(0, 0), 'same_tab_require_click' => false,
         'same_tab_after_click_delay' => array(0, 0), 'new_tab_after_click_delay' => array(0, 0),
-        'once_per' => 'never', 'every_nth_visitor' => 1, 'revisit_delay' => 0, 'revisit_delay_unit' => 'minutes',
+        'once_per' => 'never', 'every_nth_visitor' => 1, 'revisit_delay' => 0, 'revisit_delay_unit' => 'minutes', 'skip_bots' => true,
         'schedule_mode' => 'always', 'schedule_timezone' => '', 'schedule_start_date' => '', 'schedule_end_date' => '',
         'schedule_weekdays' => array(), 'schedule_times' => array(), 'run_for_minutes' => 0,
         'geo_enabled' => false, 'geo_mode' => 'allow', 'geo_countries' => array(), 'trust_proxy' => false,
