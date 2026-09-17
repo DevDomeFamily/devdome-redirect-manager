@@ -4,7 +4,7 @@ Tags: redirect, redirects, link rotator, geotargeting, 301 redirect
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.5.1
+Stable tag: 1.5.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -26,6 +26,7 @@ Every feature is free and unlimited: unlimited rules, geo targeting, device targ
 * Rotate through multiple destinations in order (first to last), randomly, or with a weighted "click distribution" you control with a slider.
 * Control how often a visitor is redirected: every visit, once per visitor, or again only after a delay you set (minutes/hours/days). Recognise a returning visitor by IP, or by IP + browser/device.
 * Redirect only every N-th unique visitor.
+* Only visitors arriving from outside: redirect visitors who land from another website or with no referrer, not those moving between your own pages. Also available to AI agents as the outside_only ability field.
 * Known bots are never redirected: crawlers, monitors and scrapers see the page as usual and only real visitors are redirected (on by default, one checkbox to turn off).
 * Open the destination in the same tab or a new tab (JavaScript method), with optional instant or randomized delays, and an optional "wait for a click" step.
 * Target by device: desktop, mobile, tablet.
@@ -103,7 +104,7 @@ No account is required for the redirect features. The geo filter is optional and
 == Frequently Asked Questions ==
 
 = Does the redirect work without JavaScript? =
-Yes. Choose 301, 302, 307, 308 or Meta Refresh for a redirect that does not need JavaScript. The JavaScript method is only needed for new-tab opening, "wait for a click", and client-side delays.
+Yes. Choose 301, 302, 307, 308 or Meta Refresh for a redirect that does not need JavaScript. The JavaScript method is only needed for new-tab opening, "wait for a click", and client-side delays. One exception: on a page served from a full-page cache, a Referring websites or Only visitors arriving from outside rule detects the landing with a small script, so those two need JavaScript on cached pages.
 
 = My redirect does not fire immediately after saving. Why? =
 A caching plugin or server cache may still be serving a stored copy of the page. Keep "Purge Page Cache On Save" enabled so the targeted pages are cleared when you save or run the rule.
@@ -178,6 +179,9 @@ Those two build inputs are not included in the distributed package. Ask for them
 5. Scheduling: run a redirect rule between dates and times in your timezone.
 
 == Changelog ==
+
+= 1.5.2 =
+* New "Only visitors arriving from outside" checkbox under What To Redirect (every scope except Referring websites, which already works this way): the rule redirects a visitor who lands on the page from another website or with no referrer at all, and leaves a visitor who moves between pages of this site on the page. Works on cached pages through the same small footer script as Referring websites. The create-redirect and update-redirect abilities accept outside_only and get-redirect returns it.
 
 = 1.5.1 =
 * New "Don't redirect known bots" checkbox under How Often To Redirect, on by default: crawlers, monitors and scrapers see the page as usual and are never redirected, so a search engine keeps indexing the page while only real visitors are sent on. Skipped bots are not counted as visitors and appear as Bots Skipped in the rule statistics. The create-redirect and update-redirect abilities accept skip_bots and get-redirect returns it together with bots_skipped.

@@ -3,7 +3,7 @@
 Plugin Name: DevDome Redirect Manager
 Plugin URI: https://devdome.com/wp-plugins/redirect-manager/
 Description: Manage redirects and rotate outgoing links with geo, device and schedule targeting. Part of the DevDome suite.
-Version: 1.5.1
+Version: 1.5.2
 Author: DevDome
 Author URI: https://devdome.com
 Requires at least: 5.6
@@ -23,7 +23,7 @@ if (file_exists(__DIR__ . '/wporg-build.php')) {
     require __DIR__ . '/wporg-build.php';
 }
 
-define('DEVDREDI_VERSION', '1.5.1');
+define('DEVDREDI_VERSION', '1.5.2');
 define('DEVDREDI_DIR', plugin_dir_path(__FILE__));
 define('DEVDREDI_URL', plugin_dir_url(__FILE__));
 

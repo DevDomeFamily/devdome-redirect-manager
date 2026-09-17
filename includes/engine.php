@@ -681,10 +681,35 @@ function devdredi_referrer_host()
     }
     $host = preg_replace('#^www\.#', '', (string) $host);
     $own  = preg_replace('#^www\.#', '', strtolower((string) wp_parse_url(home_url(), PHP_URL_HOST)));
-    if ($host === '' || $host === $own) {
+    if ($host === '' || $host === $own || $host === 'none') { // 'none' = the footer script's marker for "no referrer at all" (1.5.2)
         return '';
     }
     return $host;
+}
+
+/**
+ * Did this visitor ARRIVE from outside the site (1.5.2)? True with no referrer at all (typed, bookmark, a browser that
+ * hides it) or a referrer on another host; false when the referrer is this site, i.e. the visitor is moving between
+ * pages. The footer script's dd_rm_ref marker wins over the Referer header, because the reload it triggers carries the
+ * page itself as referrer ('none' = the landing had no referrer).
+ */
+function devdredi_arrived_from_outside()
+{
+    $own = preg_replace('#^www\.#', '', strtolower((string) wp_parse_url(home_url(), PHP_URL_HOST)));
+    if (isset($_GET['dd_rm_ref'])) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- public front-end marker, read only
+        $forced = strtolower(preg_replace('#[^a-z0-9.\-]#i', '', sanitize_text_field(wp_unslash($_GET['dd_rm_ref'])))); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        if ($forced === 'none') {
+            return true;
+        }
+        $forced = preg_replace('#^www\.#', '', $forced);
+        return $forced !== '' && $forced !== $own;
+    }
+    $ref = isset($_SERVER['HTTP_REFERER']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_REFERER'])) : '';
+    if ($ref === '') {
+        return true;
+    }
+    $host = preg_replace('#^www\.#', '', strtolower((string) wp_parse_url($ref, PHP_URL_HOST)));
+    return $host !== '' && $host !== $own;
 }
 
 /** Does the current request come from one of the rule's referring websites? */
@@ -861,6 +886,17 @@ function devdredi_selected_groups_match()
     return false;
 }
 
+/** True when one of the rule's Custom URLs covers this request. */
+function devdredi_custom_urls_match($current_full_url, $current_path, $current_host)
+{
+    foreach (array_filter(array_map('trim', explode("\n", devdredi_get_setting('custom_links_list', '')))) as $item) {
+        if (devdredi_check_url_match($item, $current_full_url, $current_path, $current_host)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /** Does the CURRENT (active) rule's "What To Redirect" condition match this request? (No side effects.) */
 function devdredi_request_matches_rule($current_full_url, $current_path, $current_host)
 {
@@ -871,19 +907,19 @@ function devdredi_request_matches_rule($current_full_url, $current_path, $curren
         return devdredi_referrer_matches() && (!devdredi_get_bool_setting('referrer_only_selected', 0) || devdredi_selected_links_match($current_full_url, $current_path, $current_host));
     }
 
+    // "Only visitors arriving from outside" (1.5.2): the page must be in scope AND the visitor must have landed here
+    // from another site or with no referrer; moving between pages of this site never triggers the rule.
+    if (devdredi_get_bool_setting('outside_only', 0) && !devdredi_arrived_from_outside()) {
+        return false;
+    }
+
     if ($what === 'selected_existing') {
         // The picked addresses, and the posts or products inside a picked category or shop archive (1.5.0).
         return devdredi_selected_links_match($current_full_url, $current_path, $current_host);
     }
 
     if ($what === 'custom_urls') {
-        $items = array_filter(array_map('trim', explode("\n", devdredi_get_setting('custom_links_list', ''))));
-        foreach ($items as $item) {
-            if (devdredi_check_url_match($item, $current_full_url, $current_path, $current_host)) {
-                return true;
-            }
-        }
-        return false;
+        return devdredi_custom_urls_match($current_full_url, $current_path, $current_host);
     }
 
     if ($what === 'all_404') {
@@ -953,7 +989,12 @@ add_action('template_redirect', function(){
             // schedule is permanently over it WILL resume — a copy cached now would freeze the
             // plain page and break the redirect once it does, so this render must be no-store
             // too. Referrer mode is excluded (its client-side bootstrap keeps pages cacheable).
-            if (devdredi_get_setting('what_to_redirect', 'entire_website') !== 'referrer'
+            // Referrer and outside-only modes keep their plain pages cacheable (the footer script re-runs the
+            // engine), EXCEPT a render that already carries the script's dd_rm_ref marker: cached with the marker,
+            // it would never reload again and the redirect would stay dead until the cache expired (1.5.2).
+            $marker = isset($_GET['dd_rm_ref']); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- presence check only
+            if (($marker || (devdredi_get_setting('what_to_redirect', 'entire_website') !== 'referrer'
+                && !devdredi_get_bool_setting('outside_only', 0)))
                 && !devdredi_schedule_permanently_over()) {
                 $targeted_off_schedule = true;
             }
@@ -1708,12 +1749,26 @@ function devdredi_referrer_engines_for_running_rules()
     $host  = sanitize_text_field(wp_unslash($_SERVER['HTTP_HOST'] ?? ''));
     $path  = sanitize_text_field(wp_unslash($_SERVER['REQUEST_URI'] ?? ''));
     $full  = (is_ssl() ? 'https://' : 'http://') . $host . $path;
+    $GLOBALS['devdredi_outside_bootstrap'] = false;
     foreach (devdredi_get_rules() as $r) {
         if (empty($r['id'])) {
             continue;
         }
         $GLOBALS['devdredi_rule'] = $r['id'];
-        if (devdredi_get_setting('plugin_state', 'stopped') !== 'running' || devdredi_get_setting('what_to_redirect', 'entire_website') !== 'referrer') {
+        if (devdredi_get_setting('plugin_state', 'stopped') !== 'running') {
+            continue;
+        }
+        $what = devdredi_get_setting('what_to_redirect', 'entire_website');
+        if ($what !== 'referrer') {
+            // "Only visitors arriving from outside" (1.5.2): a cached copy of a page in this rule's scope must carry the
+            // footer script so a landing (no referrer, or another site) reloads once and lets the engine decide live.
+            if (devdredi_get_bool_setting('outside_only', 0) && !devdredi_schedule_permanently_over()) {
+                $in_scope = ($what === 'selected_existing') ? devdredi_selected_links_match($full, $path, $host)
+                    : (($what === 'all_404') ? is_404() : (($what === 'custom_urls') ? devdredi_custom_urls_match($full, $path, $host) : true));
+                if ($in_scope) {
+                    $GLOBALS['devdredi_outside_bootstrap'] = true;
+                }
+            }
             continue;
         }
         // Out-of-schedule rules still print it: a copy cached off-hours must carry it for the redirect to work once the
@@ -1741,7 +1796,8 @@ function devdredi_print_referrer_bootstrap()
         return; // the engine handled this render server-side (that response is never cached)
     }
     $engines = devdredi_referrer_engines_for_running_rules();
-    if (empty($engines)) {
+    $outside = !empty($GLOBALS['devdredi_outside_bootstrap']);
+    if (empty($engines) && !$outside) {
         return;
     }
     // Enqueued as an inline script on an empty footer handle (the WordPress.org way), not a raw <script> tag.
@@ -1749,17 +1805,19 @@ function devdredi_print_referrer_bootstrap()
 (function(){try{
   var sp=new URLSearchParams(location.search);
   if(sp.has('dd_rm_ref')){sp.delete('dd_rm_ref');var c=location.pathname+(sp.toString()?('?'+sp.toString()):'')+location.hash;try{history.replaceState(null,document.title,c);}catch(e){}return;}
-  var ref=document.referrer||'';if(!ref)return;
+  var O=__DEVDREDI_OUTSIDE__;
+  var ref=document.referrer||'';
+  if(!ref){if(!O)return;var u0=new URL(location.href);u0.searchParams.set('dd_rm_ref','none');location.replace(u0.toString());return;}
   var h=new URL(ref).hostname.replace(/^www\./,'').toLowerCase();
   if(!h||h===location.hostname.replace(/^www\./,'').toLowerCase())return;
   var E=__DEVDREDI_ENGINES__;
-  var hit=E.some(function(d){return d.indexOf('.')===-1?h.indexOf(d)!==-1:(h===d||h.slice(-(d.length+1))==='.'+d);});
+  var hit=O||E.some(function(d){return d.indexOf('.')===-1?h.indexOf(d)!==-1:(h===d||h.slice(-(d.length+1))==='.'+d);});
   if(!hit)return;
   var u=new URL(location.href);u.searchParams.set('dd_rm_ref',h);
   location.replace(u.toString());
 }catch(e){}})();
 JS;
-    $js = str_replace('__DEVDREDI_ENGINES__', wp_json_encode(array_values($engines)), $js);
+    $js = str_replace(array('__DEVDREDI_ENGINES__', '__DEVDREDI_OUTSIDE__'), array(wp_json_encode(array_values($engines)), $outside ? 'true' : 'false'), $js);
     wp_register_script('devdredi-referrer-bootstrap', false, array(), DEVDREDI_VERSION, true);
     wp_enqueue_script('devdredi-referrer-bootstrap');
     wp_add_inline_script('devdredi-referrer-bootstrap', $js);

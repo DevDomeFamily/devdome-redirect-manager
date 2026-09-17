@@ -101,6 +101,7 @@ function devdredi_ability_rule_spec_properties()
         'name'     => array('type' => 'string', 'description' => 'Rule nickname shown in wp-admin.'),
         'what'     => array('type' => 'string', 'enum' => array('entire_website', 'selected_pages', 'custom_paths', 'all_404', 'referring_sites'), 'description' => 'What to redirect: every page of the site, selected existing pages/posts/categories (give their URLs in from), custom paths or URLs (from), every 404 page, or referring_sites = only visitors arriving from the websites in from (a domain like reddit.com covers its subdomains, a word like reddit covers every referring host containing it).'),
         'from'     => array('type' => 'array', 'items' => array('type' => 'string'), 'description' => 'Source paths or URLs on this site (custom_paths) or existing page URLs (selected_pages). For selected_pages a category URL also covers every post in it and its subcategories, a product category or shop archive URL every product in it. Ignored for entire_website and all_404.'),
+        'outside_only' => array('type' => 'boolean', 'description' => 'entire_website, selected_pages, custom_paths, all_404: true = only a visitor who ARRIVES from outside (another website, or no referrer at all) is redirected; a visitor moving between pages of this site stays. false (default) = every matching visit. referring_sites rules already behave this way.'),
         'referrer_pages' => array('type' => 'array', 'items' => array('type' => 'string'), 'description' => 'what = referring_sites only: redirect those visitors only on these existing category, page or post URLs of this site (the "Only on selected pages" option; a category URL also covers every post in it, a product category or shop archive URL every product in it). An empty array redirects them on every page.'),
         'method'   => array('type' => 'string', 'enum' => array('301', '302', '307', '308', 'js', 'meta'), 'description' => 'Redirect method. Server methods (301/302/307/308) and meta always open in the same tab.'),
         'destination_mode' => array('type' => 'string', 'enum' => array('provided', 'found', 'transit'), 'description' => 'provided = send to the URLs in to; found = send to a link or button found on the page whose URL or text contains one of found_link_contains; transit = send to the same path on transit_domain.'),
@@ -310,6 +311,7 @@ function devdredi_ability_format_rule($r, $with_maps = false)
         'revisit_delay' => (int) round($rev / $div),
         'revisit_delay_unit' => $unit,
         'skip_bots' => (bool) $rs('skip_bots', 1),
+        'outside_only' => (bool) $rs('outside_only', 0),
         'schedule_mode' => (string) $rs('run_mode', 'unlimited') === 'set_time' ? 'custom' : 'always',
         'schedule_timezone' => (string) $rs('schedule_timezone', ''),
         'schedule_start_date' => (string) $rs('schedule_start_date', ''),
@@ -530,6 +532,9 @@ function devdredi_ability_apply_spec($rid, $spec, $all)
     }
     if ($has('skip_bots')) {
         $ws('skip_bots', !empty($get('skip_bots', true)) ? 1 : 0);
+    }
+    if ($has('outside_only')) {
+        $ws('outside_only', !empty($get('outside_only', false)) ? 1 : 0);
     }
     if ($has('weighted_spread')) {
         $ws('descending_spread', max(0.0, min(1.0, (float) $get('weighted_spread', 0.5))));
@@ -1052,7 +1057,7 @@ function devdredi_ability_create($input = array())
         'rotation' => 'sequential', 'rotation_repeat' => true, 'weighted_spread' => 0.5, 'weighted_seed' => 0,
         'open_mode' => 'same_tab', 'same_tab_delay' => array(0, 0), 'new_tab_delay' => array(0, 0), 'same_tab_require_click' => false,
         'same_tab_after_click_delay' => array(0, 0), 'new_tab_after_click_delay' => array(0, 0),
-        'once_per' => 'never', 'every_nth_visitor' => 1, 'revisit_delay' => 0, 'revisit_delay_unit' => 'minutes', 'skip_bots' => true,
+        'once_per' => 'never', 'every_nth_visitor' => 1, 'revisit_delay' => 0, 'revisit_delay_unit' => 'minutes', 'skip_bots' => true, 'outside_only' => false,
         'schedule_mode' => 'always', 'schedule_timezone' => '', 'schedule_start_date' => '', 'schedule_end_date' => '',
         'schedule_weekdays' => array(), 'schedule_times' => array(), 'run_for_minutes' => 0,
         'geo_enabled' => false, 'geo_mode' => 'allow', 'geo_countries' => array(), 'trust_proxy' => false,

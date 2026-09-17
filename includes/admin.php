@@ -45,7 +45,7 @@ add_action('wp_ajax_devdredi_set_active', function () {
 function devdredi_rule_editable_defaults()
 {
     return array(
-        'what_to_redirect' => 'entire_website', 'redirect_source' => 'provided', 'redirect_type' => 'js',
+        'what_to_redirect' => 'entire_website', 'outside_only' => 0, 'redirect_source' => 'provided', 'redirect_type' => 'js',
         'links_mode' => 'sequential', 'links_repeat' => 1, 'descending_spread' => 0.5, 'descending_seed' => 0,
         'open_mode' => 'same_tab', 'same_tab_delay_min' => 0, 'same_tab_delay_max' => 0, 'new_tab_delay_min' => 0, 'new_tab_delay_max' => 0,
         'after_click_enabled' => 0, 'after_click_min' => 0, 'after_click_max' => 0, 'same_tab_require_click' => 0,
@@ -798,6 +798,7 @@ function devdredi_settings_page()
         devdredi_update_setting('referrer_list', implode("\n", devdredi_referrer_list($referrer_raw)));
         // "Only on selected pages": the picked URLs are the URLs To Redirect picker's list (selected_links_list).
         devdredi_update_setting('referrer_only_selected', isset($_POST['referrer_only_selected']) ? 1 : 0);
+        devdredi_update_setting('outside_only', isset($_POST['outside_only']) ? 1 : 0);
 
         $redirect_type = isset($_POST['redirect_type']) ? sanitize_text_field(wp_unslash($_POST['redirect_type'])) : 'js';
         if (!in_array($redirect_type, array('301', '302', '307', '308', 'js', 'meta'), true)) {
@@ -1115,6 +1116,7 @@ function devdredi_settings_page()
             'open_on_every' => 1,
             'run_weekdays' => array(1, 2, 3, 4, 5, 6, 7),
             'what_to_redirect' => 'entire_website',
+            'outside_only' => 0,
             'redirect_type' => 'js',
             'device_desktop' => 1,
             'device_mobile' => 1,
@@ -1544,6 +1546,8 @@ function devdredi_settings_page()
                     if (rowTarget) rowTarget.style.display = showRow ? '' : 'none';
                     var rowRef = document.getElementById('dd-row-referrer');
                     if (rowRef) rowRef.style.display = (v === 'referrer') ? '' : 'none';
+                    var rowOutside = document.getElementById('dd-row-outside');
+                    if (rowOutside) rowOutside.style.display = (v === 'referrer') ? 'none' : '';
                     var picker = document.getElementById('rm-picker-block');
                     var custom = document.getElementById('devdredi-custom-block');
                     if (picker) picker.style.display = (v === 'selected_existing' || refPick) ? '' : 'none';
@@ -2216,6 +2220,16 @@ function devdredi_settings_page()
                                 <p class="dd-hint">Use this when you want to redirect every not-found page on your site.</p>
                             </div>
                         </div>
+                    </td>
+                </tr>
+                <tr id="dd-row-outside"<?php echo ($what_to_redirect === 'referrer') ? ' style="display:none;"' : ''; ?>>
+                    <th>Arriving From Outside</th>
+                    <td>
+                        <label>
+                            <input type="checkbox" name="outside_only" id="dd-outside-only" value="1" <?php checked((int) devdredi_get_setting('outside_only', 0), 1); ?>>
+                            Only visitors arriving from outside
+                        </label>
+                        <p class="dd-hint">Redirect a visitor who lands here from another website or with no referrer; a visitor moving between pages of this site stays. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Arriving from outside means the referrer is another site, or there is none at all (typed address, bookmark, a browser that hides the referrer). Coming from a page of this site never counts. Works on cached pages through a small footer script that reloads the landing once. Referring websites rules already work this way.</span></span></p>
                     </td>
                 </tr>
                 <?php $ref_pick = ($what_to_redirect === 'referrer' && (int) devdredi_get_setting('referrer_only_selected', 0) === 1); ?>
@@ -4010,7 +4024,7 @@ function devdredi_settings_page()
              ['same_tab_require_click',s.same_tab_require_click],['same_tab_after_click_enabled',s.same_tab_after_click_enabled],
              ['geo_filter_enabled',s.geo_filter_enabled],['trust_proxy',s.trust_proxy],
              ['device_desktop',s.device_desktop],['device_mobile',s.device_mobile],['device_tablet',s.device_tablet],
-             ['purge_cache_on_save',s.purge_cache_on_save],['referrer_only_selected',s.referrer_only_selected],['skip_bots',s.skip_bots]
+             ['purge_cache_on_save',s.purge_cache_on_save],['referrer_only_selected',s.referrer_only_selected],['skip_bots',s.skip_bots],['outside_only',s.outside_only]
             ].forEach(function(p){ setCheck(p[0],p[1]); });
 
             // numbers
