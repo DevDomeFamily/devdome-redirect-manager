@@ -13,6 +13,8 @@ global $wpdb;
 $devdredi_table = $wpdb->prefix . 'devdredi_settings';
 // phpcs:disable WordPress.DB, PluginCheck.Security.DirectDB -- one-time uninstall cleanup of the plugin's own data; table from $wpdb->prefix; static LIKE literals.
 $wpdb->query( "DROP TABLE IF EXISTS {$devdredi_table}" );
+$devdredi_passes = $wpdb->prefix . 'devdredi_passes';
+$wpdb->query( "DROP TABLE IF EXISTS {$devdredi_passes}" );
 
 $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE 'devdredi_%'" );
 $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_devdredi_%' OR option_name LIKE '_transient_timeout_devdredi_%'" );

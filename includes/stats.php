@@ -211,6 +211,83 @@ function devdredi_track_visit($link_label, $outgoing_url = null, $status_code = 
     }
 }
 
+/**
+ * Count one JS redirect (once per visitor per 30s) and record it for run-once / revisit suppression.
+ * Shared by the counter pixel below and by the Visitor Check verifier (1.5.4), which counts a protected
+ * redirect only after its pass was accepted.
+ */
+function devdredi_count_js_redirect($label, $out, $rid, $ref, $is_slc, $is_404, $fp)
+{
+    // Identify the visitor the way track_visit does — the suite beacon's session cookie
+    // when present, else REMOTE_ADDR — so the 30s dedupe doesn't fold distinct visitors
+    // sharing one public IP into a single counted redirect.
+    $dedupe_ident = sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ?? '' ) );
+    if (!empty($_COOKIE['ddc_sid'])) {
+        $dedupe_sid = preg_replace('/[^a-f0-9]/', '', sanitize_text_field(wp_unslash($_COOKIE['ddc_sid'])));
+        if (strlen($dedupe_sid) >= 8) { $dedupe_ident = 'sid:' . $dedupe_sid; }
+    }
+    $count_key = 'devdredi_redirect_count_' . md5(($rid ?: ($label . '|' . ($out ?: ''))) . '|' . $dedupe_ident);
+    $is_first = (get_transient($count_key) === false);
+    if ($is_first) {
+        $rc = (int) devdredi_get_setting('user_redirects_count', 0);
+        if (empty($GLOBALS['devdredi_read_failed'])) { devdredi_update_setting('user_redirects_count', $rc + 1); }
+        set_transient($count_key, 1, 30);
+
+        // Per-dimension redirect counts (feed the "Redirects: N" lists).
+        $src_path = devdredi_normalize_path($label); // label = source page full URL
+        if ($src_path !== '') { devdredi_bump_count('rc_by_source', $src_path); }
+        if ($out !== '') { devdredi_bump_count('rc_by_dest', $out); }
+        $ref_host = $ref ? strtolower((string) wp_parse_url($ref, PHP_URL_HOST)) : '';
+        $ref_host = preg_replace('#^www\.#', '', (string) $ref_host);
+        if ($ref_host !== '') { devdredi_bump_count('rc_by_referrer', $ref_host); }
+        if ($fp !== '') { devdredi_bump_count('rc_by_found', $fp); }
+        // Country only when geo filtering is on (already resolved + cached for this IP, so no extra API call).
+        $daily_cc = '';
+        if (devdredi_get_setting('geo_filter_enabled', 0)) {
+            $cc = strtoupper((string) devdredi_get_user_country());
+            if ($cc !== '' && $cc !== 'UNKNOWN') { devdredi_bump_count('rc_by_country', $cc); $daily_cc = $cc; }
+        }
+
+        // Per-device redirect counts (desktop / mobile / tablet).
+        $daily_dev = '';
+        if (function_exists('devdredi_device_type')) {
+            $dtype = devdredi_device_type();
+            $dc = (int) devdredi_get_setting('device_count_' . $dtype, 0);
+            if (empty($GLOBALS['devdredi_read_failed'])) { devdredi_update_setting('device_count_' . $dtype, $dc + 1); }
+            $daily_dev = ($dtype === 'mobile') ? 'dm' : (($dtype === 'tablet') ? 'dt' : 'dd');
+        }
+        $daily_inc = array('red' => 1);
+        if ($daily_dev !== '') { $daily_inc[$daily_dev] = 1; }
+        devdredi_bump_daily($daily_inc, $daily_cc);
+
+        $run_once = devdredi_get_setting('run_once', 'never');
+        // Record the redirect for run-once / revisit suppression whenever run_once is
+        // set — a 0 revisit_delay means "once forever", so it must record too (gating on
+        // revisit_delay > 0 made "once per visitor" never suppress).
+        if ($run_once !== 'never') {
+            $visitor_key = devdredi_get_visitor_key();
+            $visitor_id = '';
+            if ($run_once === 'ip') {
+                $visitor_id = $visitor_key;
+            } elseif ($run_once === 'ip_ua') {
+                $user_agent = sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ?? '' ) );
+                $visitor_id = hash('sha256', $visitor_key . "\n" . (string) $user_agent);
+            }
+            devdredi_record_last_redirect($visitor_id);
+        }
+
+        $ignore_ref = ($ref === '');
+        devdredi_track_visit($label, $out, null, null, $is_404, $ignore_ref, 'JS', $rid, false, ($ref !== '' ? $ref : null), $is_slc);
+
+        /**
+         * Fires when a rule issues a redirect (1.5.4), here type 'js'. With Visitor Check on it runs in the verifier, for a
+         * pass this site issued. Without it, it runs from the public counter pixel the browser fires, so the details are
+         * what that browser reported: treat them as telemetry, never as proof (same trust as the redirect statistics).
+         */
+        do_action('devdredi_redirected', $out, $label, $ref, 'js');
+    }
+}
+
 // JS-redirect counter pixel: the redirect JS fires ...?devdredi_r=1&p=<payload>. This counts
 // the redirect once per visitor (30s window) and enforces the run-once revisit delay, then 204s.
 add_action('init', function(){
@@ -258,71 +335,16 @@ add_action('init', function(){
         if (empty($GLOBALS['devdredi_rule']) && (string) devdredi_get_setting('plugin_state', 'stopped') !== 'running') {
             return;
         }
+        // Visitor Check (1.5.4): a protected redirect is counted by the verifier once its pass is accepted, never by this pixel.
+        if (devdredi_visitor_check_active()) {
+            status_header(204);
+            exit;
+        }
         if ($label !== '' && $out !== '' && strpos($out, '/wp-admin/') === false) {
             $host = wp_parse_url($out, PHP_URL_HOST);
             $scheme = wp_parse_url($out, PHP_URL_SCHEME);
             if ($host && in_array($scheme, array('http','https'), true)) {
-                // Identify the visitor the way track_visit does — the suite beacon's session cookie
-                // when present, else REMOTE_ADDR — so the 30s dedupe doesn't fold distinct visitors
-                // sharing one public IP into a single counted redirect.
-                $dedupe_ident = sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ?? '' ) );
-                if (!empty($_COOKIE['ddc_sid'])) {
-                    $dedupe_sid = preg_replace('/[^a-f0-9]/', '', sanitize_text_field(wp_unslash($_COOKIE['ddc_sid'])));
-                    if (strlen($dedupe_sid) >= 8) { $dedupe_ident = 'sid:' . $dedupe_sid; }
-                }
-                $count_key = 'devdredi_redirect_count_' . md5(($rid ?: ($label . '|' . ($out ?: ''))) . '|' . $dedupe_ident);
-                $is_first = (get_transient($count_key) === false);
-                if ($is_first) {
-                    $rc = (int) devdredi_get_setting('user_redirects_count', 0);
-                    if (empty($GLOBALS['devdredi_read_failed'])) { devdredi_update_setting('user_redirects_count', $rc + 1); }
-                    set_transient($count_key, 1, 30);
-
-                    // Per-dimension redirect counts (feed the "Redirects: N" lists).
-                    $src_path = devdredi_normalize_path($label); // label = source page full URL
-                    if ($src_path !== '') { devdredi_bump_count('rc_by_source', $src_path); }
-                    if ($out !== '') { devdredi_bump_count('rc_by_dest', $out); }
-                    $ref_host = $ref ? strtolower((string) wp_parse_url($ref, PHP_URL_HOST)) : '';
-                    $ref_host = preg_replace('#^www\.#', '', (string) $ref_host);
-                    if ($ref_host !== '') { devdredi_bump_count('rc_by_referrer', $ref_host); }
-                    if (isset($data['fp']) && $data['fp'] !== '') { devdredi_bump_count('rc_by_found', sanitize_text_field((string) $data['fp'])); }
-                    // Country only when geo filtering is on (already resolved + cached for this IP, so no extra API call).
-                    $daily_cc = '';
-                    if (devdredi_get_setting('geo_filter_enabled', 0)) {
-                        $cc = strtoupper((string) devdredi_get_user_country());
-                        if ($cc !== '' && $cc !== 'UNKNOWN') { devdredi_bump_count('rc_by_country', $cc); $daily_cc = $cc; }
-                    }
-
-                    // Per-device redirect counts (desktop / mobile / tablet).
-                    $daily_dev = '';
-                    if (function_exists('devdredi_device_type')) {
-                        $dtype = devdredi_device_type();
-                        $dc = (int) devdredi_get_setting('device_count_' . $dtype, 0);
-                        if (empty($GLOBALS['devdredi_read_failed'])) { devdredi_update_setting('device_count_' . $dtype, $dc + 1); }
-                        $daily_dev = ($dtype === 'mobile') ? 'dm' : (($dtype === 'tablet') ? 'dt' : 'dd');
-                    }
-                    $daily_inc = array('red' => 1);
-                    if ($daily_dev !== '') { $daily_inc[$daily_dev] = 1; }
-                    devdredi_bump_daily($daily_inc, $daily_cc);
-
-                    $run_once = devdredi_get_setting('run_once', 'never');
-                    // Record the redirect for run-once / revisit suppression whenever run_once is
-                    // set — a 0 revisit_delay means "once forever", so it must record too (gating on
-                    // revisit_delay > 0 made "once per visitor" never suppress).
-                    if ($run_once !== 'never') {
-                        $visitor_key = devdredi_get_visitor_key();
-                        $visitor_id = '';
-                        if ($run_once === 'ip') {
-                            $visitor_id = $visitor_key;
-                        } elseif ($run_once === 'ip_ua') {
-                            $user_agent = sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ?? '' ) );
-                            $visitor_id = hash('sha256', $visitor_key . "\n" . (string) $user_agent);
-                        }
-                        devdredi_record_last_redirect($visitor_id);
-                    }
-
-                    $ignore_ref = ($ref === '');
-                    devdredi_track_visit($label, $out, null, null, $is_404, $ignore_ref, 'JS', $rid, false, ($ref !== '' ? $ref : null), $is_slc);
-                }
+                devdredi_count_js_redirect($label, $out, $rid, $ref, $is_slc, $is_404, isset($data['fp']) ? sanitize_text_field((string) $data['fp']) : '');
                 status_header(204);
                 exit;
             }

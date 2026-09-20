@@ -50,7 +50,7 @@ function devdredi_rule_editable_defaults()
         'open_mode' => 'same_tab', 'same_tab_delay_min' => 0, 'same_tab_delay_max' => 0, 'new_tab_delay_min' => 0, 'new_tab_delay_max' => 0,
         'after_click_enabled' => 0, 'after_click_min' => 0, 'after_click_max' => 0, 'same_tab_require_click' => 0,
         'same_tab_after_click_enabled' => 0, 'same_tab_after_click_min' => 0, 'same_tab_after_click_max' => 0,
-        'run_once' => 'ip', 'open_on_every' => 1, 'revisit_delay' => 0, 'revisit_delay_unit' => 'minutes', 'skip_bots' => 1, 'runtime_minutes' => 0,
+        'run_once' => 'ip', 'open_on_every' => 1, 'revisit_delay' => 0, 'revisit_delay_unit' => 'minutes', 'skip_bots' => 1, 'skip_old_browsers' => 0, 'never_ips_enabled' => 0, 'never_ips' => '', 'never_uas_enabled' => 0, 'never_uas' => '', 'never_roles_enabled' => 0, 'never_roles' => '', 'visitor_check' => 0, 'daily_limit_enabled' => 0, 'daily_limit_min' => 0, 'daily_limit_max' => 0, 'referrer_utm_scan' => 0, 'runtime_minutes' => 0,
         'run_mode' => 'unlimited', 'schedule_timezone' => '', 'geo_filter_enabled' => 0, 'geo_filter_mode' => 'whitelist',
         'geo_filter_whitelist' => '', 'geo_filter_blacklist' => '', 'trust_proxy' => 0,
         'device_desktop' => 1, 'device_mobile' => 1, 'device_tablet' => 1, 'purge_cache_on_save' => 1,
@@ -438,6 +438,7 @@ function devdredi_sanitize_imported_setting($key, $raw, $default)
         $arr = @unserialize($raw, array('allowed_classes' => false));
         return is_array($arr) ? devdredi_sanitize_scalar_tree($arr) : null;
     }
+    if (in_array($key, array('never_ips_enabled', 'never_uas_enabled', 'never_roles_enabled'), true)) { return ((int) $raw === 1) ? 1 : 0; } // a switch is 0 or 1, nothing else
     if (is_int($default))   { return (int) $raw; }
     if (is_float($default)) { return (float) $raw; }
 
@@ -450,6 +451,9 @@ function devdredi_sanitize_imported_setting($key, $raw, $default)
         $meta = json_decode($raw, true);
         return is_array($meta) ? (string) wp_json_encode(devdredi_sanitize_scalar_tree($meta)) : '';
     }
+    if ($key === 'never_ips')   { return devdredi_never_clean_ips($raw); }
+    if ($key === 'never_uas')   { return devdredi_never_clean_uas($raw); }
+    if ($key === 'never_roles') { return devdredi_never_clean_roles($raw); }
     // Multi-line lists must keep their newlines; every other setting is a single-line value.
     $multiline = array('links_list', 'custom_links_list', 'selected_links_list', 'page_links_contains', 'referrer_list');
     return in_array($key, $multiline, true) ? sanitize_textarea_field($raw) : sanitize_text_field($raw);
@@ -798,6 +802,7 @@ function devdredi_settings_page()
         devdredi_update_setting('referrer_list', implode("\n", devdredi_referrer_list($referrer_raw)));
         // "Only on selected pages": the picked URLs are the URLs To Redirect picker's list (selected_links_list).
         devdredi_update_setting('referrer_only_selected', isset($_POST['referrer_only_selected']) ? 1 : 0);
+        devdredi_update_setting('referrer_utm_scan', isset($_POST['referrer_utm_scan']) ? 1 : 0);
         devdredi_update_setting('outside_only', isset($_POST['outside_only']) ? 1 : 0);
 
         $redirect_type = isset($_POST['redirect_type']) ? sanitize_text_field(wp_unslash($_POST['redirect_type'])) : 'js';
@@ -972,6 +977,27 @@ function devdredi_settings_page()
         devdredi_update_setting('revisit_delay', $revisit_delay);
         devdredi_update_setting('revisit_delay_unit', $revisit_delay_unit);
         devdredi_update_setting('skip_bots', isset($_POST['skip_bots']) ? 1 : 0);
+        devdredi_update_setting('skip_old_browsers', isset($_POST['skip_old_browsers']) ? 1 : 0);
+        // Never Redirect lists (1.5.5): only valid addresses / ranges, usable browser strings and roles that exist are kept.
+        // Each list has its own Enable checkbox; a list that is switched off keeps its entries.
+        foreach (array('never_ips_enabled', 'never_uas_enabled', 'never_roles_enabled') as $never_flag) {
+            devdredi_update_setting($never_flag, isset($_POST[$never_flag]) ? 1 : 0);
+        }
+        devdredi_update_setting('never_ips', devdredi_never_clean_ips(isset($_POST['never_ips']) ? sanitize_textarea_field(wp_unslash($_POST['never_ips'])) : ''));
+        devdredi_update_setting('never_uas', devdredi_never_clean_uas(isset($_POST['never_uas']) ? sanitize_textarea_field(wp_unslash($_POST['never_uas'])) : ''));
+        devdredi_update_setting('never_roles', devdredi_never_clean_roles(isset($_POST['never_roles']) && is_array($_POST['never_roles']) ? array_map('sanitize_key', wp_unslash($_POST['never_roles'])) : array()));
+        devdredi_update_setting('visitor_check', isset($_POST['visitor_check']) ? 1 : 0);
+        // Daily Redirect Limit (1.5.4): two whole numbers, capped, lower never above upper; a changed range re-picks today's limit.
+        $daily_limit_min = isset($_POST['daily_limit_min']) ? min(100000000, max(0, absint(wp_unslash($_POST['daily_limit_min'])))) : 0;
+        $daily_limit_max = isset($_POST['daily_limit_max']) ? min(100000000, max(0, absint(wp_unslash($_POST['daily_limit_max'])))) : 0;
+        if ($daily_limit_max > 0 && $daily_limit_min > $daily_limit_max) {
+            $daily_limit_min = $daily_limit_max;
+        }
+        // A changed range re-picks today's limit and keeps today's count; the same numbers change nothing.
+        devdredi_daily_limit_range_changed((int) devdredi_get_setting('daily_limit_min', 0), (int) devdredi_get_setting('daily_limit_max', 0), $daily_limit_min, $daily_limit_max);
+        devdredi_update_setting('daily_limit_enabled', isset($_POST['daily_limit_enabled']) ? 1 : 0);
+        devdredi_update_setting('daily_limit_min', $daily_limit_min);
+        devdredi_update_setting('daily_limit_max', $daily_limit_max);
 
         foreach (array('device_desktop', 'device_mobile', 'device_tablet') as $dk) {
             devdredi_update_setting($dk, isset($_POST[$dk]) ? 1 : 0);
@@ -1124,6 +1150,18 @@ function devdredi_settings_page()
             'purge_cache_on_save' => 1,
             'revisit_delay' => 0,
             'skip_bots' => 1,
+            'skip_old_browsers' => 0,
+            'never_ips_enabled' => 0,
+            'never_ips' => '',
+            'never_uas_enabled' => 0,
+            'never_uas' => '',
+            'never_roles_enabled' => 0,
+            'never_roles' => '',
+            'visitor_check' => 0,
+            'daily_limit_enabled' => 0,
+            'daily_limit_min' => 0,
+            'daily_limit_max' => 0,
+            'referrer_utm_scan' => 0,
             'geo_filter_country_codes' => '',
             'geo_filter_mode' => 'whitelist',
             'geo_filter_whitelist' => '',
@@ -1183,6 +1221,17 @@ function devdredi_settings_page()
     $same_tab_after_click_max = (float) devdredi_get_setting('same_tab_after_click_max', 0);
     $run_once = devdredi_get_setting('run_once', 'ip');
     $skip_bots = (int) devdredi_get_setting('skip_bots', 1);
+    $skip_old_browsers = (int) devdredi_get_setting('skip_old_browsers', 0);
+    $never_ips_enabled = (int) devdredi_get_setting('never_ips_enabled', 0);
+    $never_uas_enabled = (int) devdredi_get_setting('never_uas_enabled', 0);
+    $never_roles_enabled = (int) devdredi_get_setting('never_roles_enabled', 0);
+    $never_ips = (string) devdredi_get_setting('never_ips', '');
+    $never_uas = (string) devdredi_get_setting('never_uas', '');
+    $never_roles = array_filter(explode(',', (string) devdredi_get_setting('never_roles', '')));
+    $visitor_check = (int) devdredi_get_setting('visitor_check', 0);
+    $daily_limit_enabled = (int) devdredi_get_setting('daily_limit_enabled', 0);
+    $daily_limit_min = (int) devdredi_get_setting('daily_limit_min', 0);
+    $daily_limit_max = (int) devdredi_get_setting('daily_limit_max', 0);
     $plugin_state = devdredi_get_setting('plugin_state', 'stopped');
 
     if ($run_once === 'never') {
@@ -2253,6 +2302,11 @@ function devdredi_settings_page()
                             Only on selected pages
                         </label>
                         <p class="dd-hint">Pick the categories, pages or posts under URLs To Redirect. Visitors from these websites are redirected only there. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Unticked, the rule redirects these visitors on every page. A picked category covers every post in it and in its subcategories, a picked product category or shop archive every product in it.</span></span></p>
+                        <label style="display:block; margin-top:12px;">
+                            <input type="checkbox" name="referrer_utm_scan" value="1" <?php checked((int) devdredi_get_setting('referrer_utm_scan', 0), 1); ?>>
+                            Also match the link's UTM source
+                        </label>
+                        <p class="dd-hint">For sources that send no referrer, such as apps. Tag your own link, for example ?utm_source=reddit.com. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">The rule also fires when the address carries a utm_source equal to one of the websites above: reddit.com is matched by ?utm_source=reddit.com and by ?utm_source=reddit. A UTM source is a label anyone can put on a link, so it is not proof of where the visitor came from.</span></span></p>
                     </td>
                 </tr>
                 <tr id="dd-row-targetpages"<?php echo (in_array($what_to_redirect, array('selected_existing', 'custom_urls'), true) || $ref_pick) ? '' : ' style="display:none;"'; ?>>
@@ -2557,7 +2611,44 @@ function devdredi_settings_page()
                             <input type="checkbox" name="skip_bots" value="1" <?php checked($skip_bots, 1); ?>>
                             Don't redirect known bots
                         </label>
-                        <p class="dd-hint">Crawlers, monitors and scrapers see the page as usual; only real visitors are redirected. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Recognised by a built-in list of user-agent tokens (search engine crawlers, uptime monitors, scrapers, headless browsers), plus Spamhaus DROP addresses where the shared DevDome bot data is present on the site. A skipped bot is not redirected, not sent to the bypass link and not counted as a visitor. Keep it on so search engines keep indexing the page.</span></span></p>
+                        <p class="dd-hint">Recognised crawlers, monitors and scrapers see the page as usual and are not counted as visitors. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Recognised by a built-in list of user-agent tokens (search engine crawlers, uptime monitors, scrapers, headless browsers), plus Spamhaus DROP addresses where the shared DevDome bot data is present on the site. A skipped bot is not redirected, not sent to the bypass link and not counted as a visitor. Keep it on so automated traffic does not inflate your redirect statistics.</span></span></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th>Outdated Browsers</th>
+                    <td>
+                        <label>
+                            <input type="checkbox" name="skip_old_browsers" value="1" <?php checked($skip_old_browsers, 1); ?>>
+                            Don't redirect outdated browsers
+                        </label>
+                        <p class="dd-hint">Desktop browsers that are years behind see the page as usual and are counted with the skipped bots. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Desktop Chrome, Edge and Firefox update themselves, and automated traffic often reports an old version. Older versions can still belong to real visitors, so switch this on only if it suits your audience. Applies to desktop Chrome and Edge below version 125 and Firefox below version 125. Chrome 109, Edge 109 and Firefox 115 stay allowed because they are the last versions for older computers. Phones and tablets are never judged.</span></span></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th>Visitor Check</th>
+                    <td>
+                        <label>
+                            <input type="checkbox" name="visitor_check" value="1" <?php checked($visitor_check, 1); ?>>
+                            Require the same IP address to continue
+                        </label>
+                        <p class="dd-hint">The redirect continues only from the IP address and browser that opened the page. Real visitors notice nothing. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">The page carries a single-use pass instead of the destination. The browser hands the pass back to this site, and only a matching, unused pass is sent on. A hidden bot that opens the page on one address and continues from another is not redirected and is counted with the skipped bots. Works with JavaScript redirects to a provided or transit destination. A visitor whose network changes between the two steps sees a short message and can open the page again. This check cannot stop someone from opening the destination address directly.</span></span></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th>Daily Redirect Limit</th>
+                    <td>
+                        <label>
+                            <input type="checkbox" name="daily_limit_enabled" id="dd-daily-limit-enabled" value="1" <?php checked($daily_limit_enabled, 1); ?>>
+                            Limit redirects per day
+                        </label>
+                        <div id="dd-daily-limit-fields" style="margin-top:10px;<?php echo $daily_limit_enabled ? '' : 'display:none;'; ?>">
+                            Between <input type="number" step="1" min="0" name="daily_limit_min" value="<?php echo esc_attr($daily_limit_min); ?>" style="width:90px;">
+                            and <input type="number" step="1" min="0" name="daily_limit_max" value="<?php echo esc_attr($daily_limit_max); ?>" style="width:90px;"> redirects
+                            <?php $daily_limit_now = devdredi_daily_limit_today(); if (is_array($daily_limit_now)) : ?>
+                                <p class="dd-hint">Today: <?php echo (int) $daily_limit_now['used']; ?> of <?php echo (int) $daily_limit_now['cap']; ?> redirects.</p>
+                            <?php endif; ?>
+                        </div>
+                        <p class="dd-hint">Once the limit is reached the rule stops redirecting until midnight, site time. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Each day the limit is picked between the two numbers; enter the same number twice for a fixed limit. Visitors over the limit get what the rule does with visitors it does not redirect: they stay on the page or go to the bypass link. A redirect is counted the moment the rule makes it. With Visitor Check on, that is when the visitor's pass is accepted, so a page that is only loaded costs nothing. Resetting the statistics does not reset today's count.</span></span></p>
                     </td>
                 </tr>
 
@@ -2855,6 +2946,49 @@ function devdredi_settings_page()
                         <small id="dd-bypass-error" style="display:none;margin-top:6px;color:#ef4444;font-size:12px;"></small>
                         <div id="dd-bypass-selected" style="max-width:480px;"></div>
                         <input type="hidden" name="fallback_url" id="dd-bypass-store" value="<?php echo esc_attr(devdredi_get_setting('fallback_url', '')); ?>">
+                    </td>
+                </tr>
+                <tr>
+                    <th>Excluded IP Addresses</th>
+                    <td>
+                        <label>
+                            <input type="checkbox" name="never_ips_enabled" class="dd-never-toggle" data-fields="dd-never-ips-fields" value="1" <?php checked($never_ips_enabled, 1); ?>>
+                            Don't redirect these IP addresses or ranges
+                        </label>
+                        <div id="dd-never-ips-fields" style="margin-top:10px;<?php echo $never_ips_enabled ? '' : 'display:none;'; ?>">
+                            <textarea name="never_ips" id="dd-never-ips" rows="3" class="dd-textarea" placeholder="e.g. 203.0.113.7 or 203.0.113.0/24, one per line" autocomplete="off" spellcheck="false" style="display:block;width:100%;max-width:520px;"><?php echo esc_textarea($never_ips); ?></textarea>
+                        </div>
+                        <p class="dd-hint">Enter one IPv4 or IPv6 address or CIDR range per line to leave those visitors on the page. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Add your own public IP address, your office range or a scraper's fixed address. Matching visitors see the page as usual, are not sent to the bypass link and are counted with the skipped bots instead of visitors. Everyone sharing a listed address or range is skipped. This cannot reliably stop a bot that changes address on every visit unless its addresses stay within the listed ranges. Leave empty to skip nobody by IP address.</span></span></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th>Excluded Browser Strings</th>
+                    <td>
+                        <label>
+                            <input type="checkbox" name="never_uas_enabled" class="dd-never-toggle" data-fields="dd-never-uas-fields" value="1" <?php checked($never_uas_enabled, 1); ?>>
+                            Don't redirect these browser strings
+                        </label>
+                        <div id="dd-never-uas-fields" style="margin-top:10px;<?php echo $never_uas_enabled ? '' : 'display:none;'; ?>">
+                            <textarea name="never_uas" id="dd-never-uas" rows="3" class="dd-textarea" placeholder="e.g. a full User-Agent or a distinctive part of it, one per line" autocomplete="off" spellcheck="false" style="display:block;width:100%;max-width:520px;"><?php echo esc_textarea($never_uas); ?></textarea>
+                        </div>
+                        <p class="dd-hint">One browser string or part of it per line. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">A visitor is skipped when their browser string (User-Agent) contains any listed text, ignoring upper and lower case. Use a distinctive string for a bot that reports the same browser identifier on each visit. Matching visitors see the page as usual, are not sent to the bypass link and are counted with the skipped bots instead of visitors. Common text can also match real visitors, so entries shorter than 5 characters are not saved. The exclusion stops working when the bot changes its string so it no longer contains the listed text. Leave empty to skip nobody by browser string.</span></span></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th>Excluded User Roles</th>
+                    <td>
+                        <label>
+                            <input type="checkbox" name="never_roles_enabled" class="dd-never-toggle" data-fields="dd-never-roles-fields" value="1" <?php checked($never_roles_enabled, 1); ?>>
+                            Don't redirect users with these roles
+                        </label>
+                        <div id="dd-never-roles-fields" style="margin-top:10px;<?php echo $never_roles_enabled ? '' : 'display:none;'; ?>">
+                            <div style="display:flex;flex-wrap:wrap;gap:6px 18px;">
+                                <?php foreach (wp_roles()->get_names() as $never_role_slug => $never_role_name) : ?>
+                                    <label><input type="checkbox" name="never_roles[]" value="<?php echo esc_attr($never_role_slug); ?>" <?php checked(in_array((string) $never_role_slug, $never_roles, true)); ?>> <?php echo esc_html(translate_user_role($never_role_name)); ?></label>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+                        <p class="dd-hint">Logged-in users with a ticked role are skipped. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Select the roles used by people working on this site, such as Administrator and Editor. A logged-in user with any selected role is not redirected, is not sent to the bypass link and is counted with the skipped bots instead of visitors. This does not apply when the user is logged out. A page cache may serve a stored page without checking the user's role, so a cached redirect may still run. Leave all roles unchecked to skip nobody by role.</span></span></p>
                     </td>
                 </tr>
             </table>
@@ -3198,6 +3332,20 @@ function devdredi_settings_page()
                     }
 
                     syncRunMode();
+
+                    // Daily Redirect Limit: the checkbox reveals the two number fields.
+                    var dlEnable = document.getElementById('dd-daily-limit-enabled'), dlFields = document.getElementById('dd-daily-limit-fields');
+                    function syncDailyLimit() { if (dlFields) { dlFields.style.display = (dlEnable && dlEnable.checked) ? '' : 'none'; } }
+                    if (dlEnable) { dlEnable.addEventListener('change', syncDailyLimit); }
+                    syncDailyLimit();
+
+                    // Excluded IP Addresses / Browser Strings / User Roles: each checkbox reveals its own field.
+                    form.querySelectorAll('.dd-never-toggle').forEach(function (t) {
+                        var box = document.getElementById(t.getAttribute('data-fields'));
+                        var syncNever = function () { if (box) { box.style.display = t.checked ? '' : 'none'; } };
+                        t.addEventListener('change', syncNever);
+                        syncNever();
+                    });
 
 
                     // Redirect Frequency split: two visible dropdowns (rf_freq + rf_matchby) compute hidden run_once.
@@ -4019,12 +4167,16 @@ function devdredi_settings_page()
             setStore('geo_filter_blacklist', s.geo_filter_blacklist);
             var roEl = document.getElementById('dd-run-once'); if(roEl) roEl.value = ro;
 
+            setVal('never_ips', s.never_ips); setVal('never_uas', s.never_uas);
+            var nvRoles = String(s.never_roles || '').split(',');
+            all('never_roles[]').forEach(function(c){ c.checked = nvRoles.indexOf(c.value) !== -1; });
+
             // checkboxes
             [['links_repeat',s.links_repeat],['after_click_enabled',s.after_click_enabled],
              ['same_tab_require_click',s.same_tab_require_click],['same_tab_after_click_enabled',s.same_tab_after_click_enabled],
              ['geo_filter_enabled',s.geo_filter_enabled],['trust_proxy',s.trust_proxy],
              ['device_desktop',s.device_desktop],['device_mobile',s.device_mobile],['device_tablet',s.device_tablet],
-             ['purge_cache_on_save',s.purge_cache_on_save],['referrer_only_selected',s.referrer_only_selected],['skip_bots',s.skip_bots],['outside_only',s.outside_only]
+             ['purge_cache_on_save',s.purge_cache_on_save],['referrer_only_selected',s.referrer_only_selected],['skip_bots',s.skip_bots],['skip_old_browsers',s.skip_old_browsers],['visitor_check',s.visitor_check],['daily_limit_enabled',s.daily_limit_enabled],['never_ips_enabled',s.never_ips_enabled],['never_uas_enabled',s.never_uas_enabled],['never_roles_enabled',s.never_roles_enabled],['referrer_utm_scan',s.referrer_utm_scan],['outside_only',s.outside_only]
             ].forEach(function(p){ setCheck(p[0],p[1]); });
 
             // numbers
@@ -4047,6 +4199,7 @@ function devdredi_settings_page()
             var sp = q('descending_spread'); if(sp){ sp.value = (s.descending_spread===''||s.descending_spread==null)?0.5:s.descending_spread; sp.dispatchEvent(new Event('input',{bubbles:true})); fire(sp); }
 
             // timezone select
+            setVal('daily_limit_min', s.daily_limit_min); setVal('daily_limit_max', s.daily_limit_max);
             setVal('schedule_timezone', s.schedule_timezone); fire(q('schedule_timezone'));
             setVal('schedule_start_date', s.schedule_start_date); setVal('schedule_end_date', s.schedule_end_date);
 

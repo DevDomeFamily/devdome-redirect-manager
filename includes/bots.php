@@ -42,3 +42,24 @@ function devdredi_is_known_bot()
     }
     return false;
 }
+
+/**
+ * True for a desktop browser whose version is years behind (1.5.4, "Don't redirect outdated browsers").
+ * Desktop Chrome, Edge and Firefox update themselves, so a real visitor is almost never on one of these,
+ * while automated traffic often wears an old, copied User-Agent. Fixed floors, never raised on their own;
+ * Chrome and Edge 109 (last for Windows 7/8) and Firefox 115 ESR stay allowed. Phones and tablets are never judged.
+ */
+function devdredi_is_outdated_browser()
+{
+    $ua = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_USER_AGENT'])) : '';
+    if ($ua === '' || preg_match('/Mobile|Android|iPhone|iPad/i', $ua)) {
+        return false;
+    }
+    if (preg_match('#Firefox/(\d+)#', $ua, $m)) {
+        return (int) $m[1] < 125 && (int) $m[1] !== 115;
+    }
+    if (preg_match('#(?:Chrome|Chromium)/(\d+)#', $ua, $m)) {
+        return (int) $m[1] < 125 && (int) $m[1] !== 109;
+    }
+    return false;
+}

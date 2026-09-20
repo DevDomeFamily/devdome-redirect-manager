@@ -716,15 +716,38 @@ function devdredi_arrived_from_outside()
 function devdredi_referrer_matches()
 {
     $host = devdredi_referrer_host();
-    if ($host === '') {
-        return false;
-    }
-    foreach (devdredi_referrer_list() as $entry) {
-        if (devdredi_referrer_entry_matches($host, $entry)) {
-            return true;
+    if ($host !== '') {
+        foreach (devdredi_referrer_list() as $entry) {
+            if (devdredi_referrer_entry_matches($host, $entry)) {
+                return true;
+            }
         }
     }
-    return false;
+    return devdredi_referrer_utm_entry() !== '';
+}
+
+/**
+ * UTM Source (1.5.4, off by default): the rule's referring website named by the link's own utm_source, for sources that
+ * send no referrer (apps, some social networks). ?utm_source=reddit.com or ?utm_source=reddit both match the entry
+ * reddit.com. It is a label anyone can put on a link, not proof of where the visitor came from. Returns the entry or ''.
+ */
+function devdredi_referrer_utm_entry()
+{
+    if (!devdredi_get_bool_setting('referrer_utm_scan', 0)) {
+        return '';
+    }
+    // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- public read-only campaign label, reduced to host characters and matched against the rule's own list
+    $utm = (isset($_GET['utm_source']) && is_string($_GET['utm_source'])) ? strtolower(substr(sanitize_text_field(wp_unslash($_GET['utm_source'])), 0, 100)) : '';
+    $utm = preg_replace('#^www\.#', '', (string) preg_replace('#[^a-z0-9.\-]#', '', $utm));
+    if ($utm === '') {
+        return '';
+    }
+    foreach (devdredi_referrer_list() as $entry) {
+        if ($utm === $entry || $utm === explode('.', $entry)[0]) {
+            return $entry;
+        }
+    }
+    return '';
 }
 
 /** True when the request matches one of the URLs picked under URLs To Redirect (selected_links_list). */
@@ -1073,7 +1096,11 @@ add_action('template_redirect', function(){
     // Don't redirect known bots (1.5.1, on by default): crawlers, monitors and scrapers get the page
     // as usual - no redirect, no fallback - and never count as visitors: not for the N-th visitor or
     // once-per-visitor logic and not in the page-view / unique-user statistics. Only real visitors reach the redirect below.
-    if (devdredi_get_bool_setting('skip_bots', 1) && devdredi_is_known_bot()) {
+    // Outdated browsers (1.5.4, off by default): a desktop browser version years behind is treated the same way.
+    // Never Redirect lists (1.5.5): an IP address or range, a browser string or a user role on the rule's lists, the same way.
+    if ((devdredi_get_bool_setting('skip_bots', 1) && devdredi_is_known_bot())
+        || (devdredi_get_bool_setting('skip_old_browsers', 0) && devdredi_is_outdated_browser())
+        || devdredi_never_redirect_reason() !== '') {
         $bs = (int) devdredi_get_setting('user_bot_skip_count', 0);
         if (empty($GLOBALS['devdredi_read_failed'])) { devdredi_update_setting('user_bot_skip_count', $bs + 1); }
         devdredi_bump_daily(array('bs' => 1));
@@ -1130,6 +1157,14 @@ add_action('template_redirect', function(){
     // Device targeting: only redirect the enabled device types; others pass through (fallback).
     $dtype = devdredi_device_type();
     if (!devdredi_get_setting('device_' . $dtype, 1)) {
+        devdredi_track_visit($current_full_url);
+        $devdredi_redirect_tracking_done = true;
+        devdredi_handle_fallback();
+        return;
+    }
+
+    // Daily Redirect Limit (1.5.4): once today's limit is reached, everyone else gets the rule's bypass behaviour.
+    if (devdredi_daily_limit_reached()) {
         devdredi_track_visit($current_full_url);
         $devdredi_redirect_tracking_done = true;
         devdredi_handle_fallback();
@@ -1283,6 +1318,32 @@ add_action('template_redirect', function(){
         }
     }
 
+    /**
+     * Filters the destination of a redirect the rule is about to make (1.5.4). Not run for "found on page"
+     * destinations, which are picked in the browser. Return an http(s) URL; anything else keeps the original.
+     *
+     * @param string $target          The destination URL.
+     * @param string $redirect_source 'provided' or 'transit'.
+     */
+    if ($target !== '') {
+        $filtered = apply_filters('devdredi_redirect_target', $target, $redirect_source);
+        if (is_string($filtered) && in_array(wp_parse_url($filtered, PHP_URL_SCHEME), array('http', 'https'), true) && wp_parse_url($filtered, PHP_URL_HOST)) {
+            $target = $filtered;
+        }
+    }
+
+    // Daily Redirect Limit (1.5.4): the redirect is decided, take its slot now (one conditional UPDATE, every redirect
+    // type). No slot left, or the count cannot be read = the rule's bypass behaviour. The public counter pixel never
+    // touches the limit, so nobody can use it up from outside without really being redirected. A Visitor Check redirect
+    // is charged later, by the verifier, when its pass comes back: a bot that only loads the page never costs a slot
+    // (the "limit reached" gate above already keeps the page from issuing passes once the day is full).
+    if (!(devdredi_visitor_check_active() && !$found_mode) && !devdredi_daily_limit_take()) {
+        devdredi_track_visit($current_full_url);
+        $devdredi_redirect_tracking_done = true;
+        devdredi_handle_fallback();
+        return;
+    }
+
     $devdredi_redirect_tracking_done = true;
     // This request is being handled server-side (and the response is no-store, so it's never
     // cached). Tell the cache-immunity bootstrap not to print on this render — the bootstrap
@@ -1363,6 +1424,12 @@ add_action('template_redirect', function(){
         $daily_inc = array('red' => 1);
         if ($daily_dev !== '') { $daily_inc[$daily_dev] = 1; }
         devdredi_bump_daily($daily_inc, $daily_cc);
+
+        /**
+         * Fires when a rule issues a redirect (1.5.4): destination, source page, referrer, redirect type ('301', '302',
+         * '307', '308', 'meta' or 'js'). "Issued", not "arrived": it runs just before the redirect is sent.
+         */
+        do_action('devdredi_redirected', $target, $current_full_url, $original_referer, $redirect_type);
 
         // Drop the inbound referrer so it can't ride this hop to the next site in the chain — a
         // redirect must never leak where the visitor came from (e.g. reddit) to its destination.
@@ -1513,15 +1580,38 @@ add_action('template_redirect', function(){
             return;
         }
 
+        // Visitor Check (1.5.4): the page carries a single-use pass instead of the destination; the verifier sends the
+        // visitor on only when the pass comes back from the same IP address and browser. Click-gated pages can wait long.
+        $nav = $target;
+        if (devdredi_visitor_check_active()) {
+            $click_gated = ($open_mode === 'new_tab') || (int) devdredi_get_setting('same_tab_require_click', 0);
+            $pass_url = devdredi_pass_issue($target, ($click_gated ? 1800 : 60) + (int) ceil($delay_max) + 4, array('l' => $current_full_url, 'rid' => $redirect_id, 'f' => is_404() ? 1 : 0));
+            if ($pass_url === '') {
+                return; // the pass could not be stored: a protected rule never falls back to an unprotected redirect, the visitor keeps the page
+            }
+            $nav = $pass_url;
+        }
+        $protected = ($nav !== $target);
+        // The pass is never printed as a link or as one string: a reader that does not run the script finds no address
+        // to follow. The script joins the two halves at the moment it navigates.
+        $pass_half = array('', '');
+        if ($protected && preg_match('/devdredi_v=([a-f0-9]{64})/', $nav, $pm)) {
+            $pass_half = str_split($pm[1], 32);
+        }
+        $pass_js = 'var ddvU=' . wp_json_encode(home_url('/')) . ',ddvA=' . wp_json_encode($pass_half[0]) . ',ddvB=' . wp_json_encode($pass_half[1]) . ';'
+            . "function ddvGo(){return ddvU+(ddvU.indexOf('?')===-1?'?':'&')+'devdredi_'+'v='+ddvA+ddvB+'&r='+encodeURIComponent(document.referrer||'');}";
+
         if ($open_mode === 'same_tab') {
             // Same-tab: optionally wait for a visitor click before navigating (instead of auto-redirect).
             $same_tab_require_click = (int) devdredi_get_setting('same_tab_require_click', 0);
-            add_action('wp_footer', function() use ($target, $delay, $delay_js, $after_click_js, $same_tab_require_click, $current_full_url, $bfcache_reload_js, $zero_delay_config, $redirect_id) {
+            add_action('wp_footer', function() use ($target, $nav, $protected, $pass_js, $delay, $delay_js, $after_click_js, $same_tab_require_click, $current_full_url, $bfcache_reload_js, $zero_delay_config, $redirect_id) {
                 ?>
-                <a id="go" href="<?php echo esc_url($target); ?>" style="display:none;"></a>
-                <?php devdredi_footer_js_capture(function () use ($target, $delay_js, $after_click_js, $same_tab_require_click, $current_full_url, $bfcache_reload_js, $zero_delay_config, $redirect_id) { ?>
+                <a id="go" href="<?php echo $protected ? '#' : esc_url($nav); ?>" style="display:none;"></a>
+                <?php devdredi_footer_js_capture(function () use ($target, $protected, $pass_js, $delay_js, $after_click_js, $same_tab_require_click, $current_full_url, $bfcache_reload_js, $zero_delay_config, $redirect_id) { ?>
+                    <?php if ($protected) { echo $pass_js; } // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built above from wp_json_encode() values and static JS. ?>
                     <?php echo $bfcache_reload_js; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- static inline JS, no dynamic/user data. ?>
-                    document.addEventListener('DOMContentLoaded', function() {
+                    (function () {
+                    function devdrediSameTabInit() {
                         var rid = <?php echo wp_json_encode($redirect_id); ?>;
                         <?php if ($zero_delay_config): ?>
                         (function(){
@@ -1546,6 +1636,9 @@ add_action('template_redirect', function(){
                             if (!link) return;
 
                             setTimeout(function() {
+                                <?php if ($protected): // the destination never reaches the page; the verifier counts the redirect ?>
+                                location.assign(ddvGo());
+                                <?php else: ?>
                                 try {
                                     var payload = btoa(unescape(encodeURIComponent(JSON.stringify({
                                         l: <?php echo wp_json_encode($current_full_url); ?>,
@@ -1562,6 +1655,7 @@ add_action('template_redirect', function(){
                                     if (!(navigator.sendBeacon && navigator.sendBeacon(_b))) { new Image().src = _b; }
                                 } catch (_) {}
                                 location.assign(link.href);
+                                <?php endif; ?>
                             }, 100);
                         }
                         setTimeout(function() {
@@ -1578,14 +1672,18 @@ add_action('template_redirect', function(){
                             doSameTabNav();
                             <?php endif; ?>
                         }, <?php echo $delay_js; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- inline JS numeric expression built from float settings; no user input. ?>);
-                    });
+                    }
+                    // A script optimizer can run this after DOMContentLoaded already fired: then start right away.
+                    if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', devdrediSameTabInit, { once: true }); } else { devdrediSameTabInit(); }
+                    })();
                 <?php });
             });
         } else {
-            add_action('wp_footer', function() use ($target, $delay, $delay_js, $after_click_js, $current_full_url, $bfcache_reload_js, $zero_delay_config) {
+            add_action('wp_footer', function() use ($target, $nav, $protected, $pass_js, $delay, $delay_js, $after_click_js, $current_full_url, $bfcache_reload_js, $zero_delay_config) {
                 ?>
                 <a id="go" style="display:none;" target="_blank"></a>
-                <?php devdredi_footer_js_capture(function () use ($target, $delay_js, $after_click_js, $current_full_url, $bfcache_reload_js, $zero_delay_config) { ?>
+                <?php devdredi_footer_js_capture(function () use ($target, $nav, $protected, $pass_js, $delay_js, $after_click_js, $current_full_url, $bfcache_reload_js, $zero_delay_config) { ?>
+                    <?php if ($protected) { echo $pass_js; } // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built above from wp_json_encode() values and static JS. ?>
                     <?php echo $bfcache_reload_js; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- static inline JS, no dynamic/user data. ?>
                     (function() {
                         function initClickCapture() {
@@ -1608,11 +1706,12 @@ add_action('template_redirect', function(){
                             })();
                             <?php endif; ?>
                             
-                            var targetUrl = <?php echo wp_json_encode($target); ?>;
+                            var targetUrl = <?php if ($protected): ?>ddvGo()<?php else: ?><?php echo wp_json_encode($nav); ?><?php endif; ?>;
                             var currentUrl = <?php echo wp_json_encode($current_full_url); ?>;
                             var afterDelay = <?php echo $after_click_js; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- inline JS numeric expression built from float settings; no user input. ?>;
 
                             function handleFirstClick(e) {
+                                <?php if (!$protected): ?>
                                 try {
                                     var payload = btoa(unescape(encodeURIComponent(JSON.stringify({
                                         l: currentUrl,
@@ -1626,6 +1725,7 @@ add_action('template_redirect', function(){
                                     var _b = <?php echo wp_json_encode( home_url('/') ); ?> + '?devdredi_r=1&p=' + encodeURIComponent(payload) + '&_t=' + Date.now();
                                     if (!(navigator.sendBeacon && navigator.sendBeacon(_b))) { new Image().src = _b; }
                                 } catch (_) {}
+                                <?php endif; ?>
 
                                 // Open the new tab synchronously inside the click gesture. A
                                 // window.open() fired later from setTimeout counts as an unsolicited
@@ -1750,6 +1850,7 @@ function devdredi_referrer_engines_for_running_rules()
     $path  = sanitize_text_field(wp_unslash($_SERVER['REQUEST_URI'] ?? ''));
     $full  = (is_ssl() ? 'https://' : 'http://') . $host . $path;
     $GLOBALS['devdredi_outside_bootstrap'] = false;
+    $GLOBALS['devdredi_utm_bootstrap'] = array();
     foreach (devdredi_get_rules() as $r) {
         if (empty($r['id'])) {
             continue;
@@ -1781,6 +1882,9 @@ function devdredi_referrer_engines_for_running_rules()
         }
         foreach (devdredi_referrer_list() as $e) {
             $out[$e] = 1;
+            if (devdredi_get_bool_setting('referrer_utm_scan', 0)) {
+                $GLOBALS['devdredi_utm_bootstrap'][$e] = 1; // UTM Source (1.5.4): a cached copy must reload for a tagged link too. The reload only says "no referrer" / the real referrer; the engine reads utm_source itself, per rule.
+            }
         }
     }
     $GLOBALS['devdredi_rule'] = $saved;
@@ -1806,18 +1910,21 @@ function devdredi_print_referrer_bootstrap()
   var sp=new URLSearchParams(location.search);
   if(sp.has('dd_rm_ref')){sp.delete('dd_rm_ref');var c=location.pathname+(sp.toString()?('?'+sp.toString()):'')+location.hash;try{history.replaceState(null,document.title,c);}catch(e){}return;}
   var O=__DEVDREDI_OUTSIDE__;
+  var us=(sp.get('utm_source')||'').toLowerCase().replace(/[^a-z0-9.\-]/g,'').replace(/^www\./,''),um='';
+  if(us){__DEVDREDI_UTM__.some(function(d){if(us===d||us===d.split('.')[0]){um=d;return true;}return false;});}
   var ref=document.referrer||'';
-  if(!ref){if(!O)return;var u0=new URL(location.href);u0.searchParams.set('dd_rm_ref','none');location.replace(u0.toString());return;}
+  if(!ref){if(!O&&!um)return;var u0=new URL(location.href);u0.searchParams.set('dd_rm_ref','none');location.replace(u0.toString());return;}
   var h=new URL(ref).hostname.replace(/^www\./,'').toLowerCase();
   if(!h||h===location.hostname.replace(/^www\./,'').toLowerCase())return;
   var E=__DEVDREDI_ENGINES__;
   var hit=O||E.some(function(d){return d.indexOf('.')===-1?h.indexOf(d)!==-1:(h===d||h.slice(-(d.length+1))==='.'+d);});
-  if(!hit)return;
+  if(!hit&&!um)return;
   var u=new URL(location.href);u.searchParams.set('dd_rm_ref',h);
   location.replace(u.toString());
 }catch(e){}})();
 JS;
-    $js = str_replace(array('__DEVDREDI_ENGINES__', '__DEVDREDI_OUTSIDE__'), array(wp_json_encode(array_values($engines)), $outside ? 'true' : 'false'), $js);
+    $utm = empty($GLOBALS['devdredi_utm_bootstrap']) ? array() : array_keys($GLOBALS['devdredi_utm_bootstrap']);
+    $js = str_replace(array('__DEVDREDI_ENGINES__', '__DEVDREDI_OUTSIDE__', '__DEVDREDI_UTM__'), array(wp_json_encode(array_values($engines)), $outside ? 'true' : 'false', wp_json_encode(array_values($utm))), $js);
     wp_register_script('devdredi-referrer-bootstrap', false, array(), DEVDREDI_VERSION, true);
     wp_enqueue_script('devdredi-referrer-bootstrap');
     wp_add_inline_script('devdredi-referrer-bootstrap', $js);

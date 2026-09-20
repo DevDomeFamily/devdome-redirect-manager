@@ -122,7 +122,16 @@ function devdredi_ability_rule_spec_properties()
         'every_nth_visitor' => array('type' => 'integer', 'minimum' => 1, 'description' => '1 = every eligible visitor, N = only every Nth unique visitor (needs once_per ip or ip_ua).'),
         'revisit_delay' => array('type' => 'integer', 'minimum' => 0, 'description' => 'Redirect the same visitor again after this delay; 0 = once only (needs once_per ip or ip_ua).'),
         'revisit_delay_unit' => array('type' => 'string', 'enum' => array('minutes', 'hours', 'days')),
-        'skip_bots' => array('type' => 'boolean', 'description' => 'true (default) = known bots such as crawlers, monitors and scrapers are never redirected and see the page as usual, only real visitors are redirected; false = bots are treated like any visitor.'),
+        'skip_bots' => array('type' => 'boolean', 'description' => 'true (default) = known bots such as crawlers, monitors and scrapers are never redirected, see the page as usual and are not counted as visitors; false = bots are treated like any visitor.'),
+        'skip_old_browsers' => array('type' => 'boolean', 'description' => 'true = desktop browsers years behind (Chrome or Edge below 125, Firefox below 125, except Chrome 109, Edge 109 and Firefox 115) are never redirected and are counted with the skipped bots; false (default) = no browser version check.'),
+        'skip_ips' => array('type' => 'array', 'items' => array('type' => 'string'), 'description' => 'IPv4 or IPv6 addresses and CIDR ranges that this rule never redirects. Matching visitors see the page as usual, never go to the bypass link and are counted with the skipped bots instead of visitors. Empty array (default) = no IP exclusions. Entries switch this exclusion on, an empty array switches it off; a list switched off in the settings screen reads as empty. Changing addresses outside the listed ranges are not covered. An entry that is not a valid address or range is refused.'),
+        'skip_user_agents' => array('type' => 'array', 'items' => array('type' => 'string'), 'description' => 'User-Agent substrings that this rule never redirects; matching is case-insensitive and any listed substring is enough. Matching visitors see the page as usual, never go to the bypass link and are counted with the skipped bots instead of visitors. Empty array (default) = no browser string exclusions. Entries switch this exclusion on, an empty array switches it off; a list switched off in the settings screen reads as empty. A changed string is skipped only if it still matches. Each entry needs 5 to 300 characters.'),
+        'skip_roles' => array('type' => 'array', 'items' => array('type' => 'string'), 'description' => 'WordPress role slugs, for example administrator and editor, that this rule never redirects for logged-in users with any listed role. Matching users see the page as usual, never go to the bypass link and are counted with the skipped bots instead of visitors. Empty array (default) = no role exclusions. Entries switch this exclusion on, an empty array switches it off; a list switched off in the settings screen reads as empty. Does not apply to logged-out users; cached pages may still be served without checking roles. A role that does not exist on this site is refused.'),
+        'visitor_check' => array('type' => 'boolean', 'description' => 'true = a JavaScript redirect to a provided or transit destination continues only from the IP address and browser that opened the page (single-use pass, checked on this site); a pass coming back from another address is not redirected and is counted with the skipped bots; false (default) = no check. No effect on found destinations or on 301, 302, 307, 308 and meta redirects.'),
+        'daily_limit_enabled' => array('type' => 'boolean', 'description' => 'true = the rule stops redirecting for the day once the daily limit is reached (site time, resets at midnight); visitors over the limit get the fallback behaviour. A redirect is counted the moment the rule makes it (with visitor_check on: when the pass is accepted). false (default) = no limit.'),
+        'daily_limit_min' => array('type' => 'integer', 'minimum' => 0, 'maximum' => 100000000, 'description' => 'Lower end of the daily limit. Each day the limit is picked between daily_limit_min and daily_limit_max; the same number twice = a fixed limit.'),
+        'daily_limit_max' => array('type' => 'integer', 'minimum' => 0, 'maximum' => 100000000, 'description' => 'Upper end of the daily limit; 0 = no limit even when enabled.'),
+        'referrer_utm_scan' => array('type' => 'boolean', 'description' => 'referring_sites only: true = the rule also fires when the address carries a utm_source equal to one of the referring websites (reddit.com matches utm_source=reddit.com and utm_source=reddit), for sources that send no referrer. A UTM source is a label anyone can set, not proof of origin. false (default).'),
         'schedule_mode' => array('type' => 'string', 'enum' => array('always', 'custom'), 'description' => 'always = active whenever running; custom = only inside the schedule below.'),
         'schedule_timezone' => array('type' => 'string', 'description' => 'IANA timezone, for example Europe/Berlin; empty = the site timezone.'),
         'schedule_start_date' => array('type' => 'string', 'description' => 'YYYY-MM-DD, empty = no start date.'),
@@ -131,7 +140,7 @@ function devdredi_ability_rule_spec_properties()
         'schedule_times'      => array('type' => 'array', 'maxItems' => 3, 'items' => array('type' => 'object', 'properties' => array('start' => array('type' => 'string'), 'end' => array('type' => 'string')), 'required' => array('start', 'end'), 'additionalProperties' => false), 'description' => 'Up to 3 daily windows, HH:MM to HH:MM; empty = all day.'),
         'run_for_minutes'     => array('type' => 'integer', 'minimum' => 0, 'description' => 'Stop automatically this many minutes after the rule starts; 0 = no limit.'),
         'geo_enabled' => array('type' => 'boolean', 'description' => 'Turning geo targeting on sends visitor IP addresses to the DevDome geo service; it needs confirm: true.'),
-        'confirm' => array('type' => 'boolean', 'description' => 'Required (true) when the change turns geo targeting on: visitor IP addresses are then sent to api.devdome.com. Ask the user first.'),
+        'confirm' => array('type' => 'boolean', 'description' => 'Required (true) when the change turns geo targeting on (visitor IP addresses are then sent to api.devdome.com) or switches visitor_check or skip_old_browsers off (a bot protection is lowered). Ask the user first.'),
         'geo_mode'    => array('type' => 'string', 'enum' => array('allow', 'block'), 'description' => 'allow = redirect only the listed countries; block = redirect everyone except the listed countries.'),
         'geo_countries' => array('type' => 'array', 'items' => array('type' => 'string'), 'description' => 'ISO 3166-1 alpha-2 codes, for example US, DE, GB.'),
         'trust_proxy' => array('type' => 'boolean', 'description' => 'Read the visitor IP from the proxy or CDN forwarding header (Cloudflare and similar).'),
@@ -311,6 +320,15 @@ function devdredi_ability_format_rule($r, $with_maps = false)
         'revisit_delay' => (int) round($rev / $div),
         'revisit_delay_unit' => $unit,
         'skip_bots' => (bool) $rs('skip_bots', 1),
+        'skip_old_browsers' => (bool) $rs('skip_old_browsers', 0),
+        'skip_ips' => $rs('never_ips_enabled', 0) ? array_values(array_filter(explode("\n", (string) $rs('never_ips', '')))) : array(),
+        'skip_user_agents' => $rs('never_uas_enabled', 0) ? array_values(array_filter(explode("\n", (string) $rs('never_uas', '')))) : array(),
+        'skip_roles' => $rs('never_roles_enabled', 0) ? array_values(array_filter(explode(',', (string) $rs('never_roles', '')))) : array(),
+        'visitor_check' => (bool) $rs('visitor_check', 0),
+        'daily_limit_enabled' => (bool) $rs('daily_limit_enabled', 0),
+        'daily_limit_min' => (int) $rs('daily_limit_min', 0),
+        'daily_limit_max' => (int) $rs('daily_limit_max', 0),
+        'referrer_utm_scan' => (bool) $rs('referrer_utm_scan', 0),
         'outside_only' => (bool) $rs('outside_only', 0),
         'schedule_mode' => (string) $rs('run_mode', 'unlimited') === 'set_time' ? 'custom' : 'always',
         'schedule_timezone' => (string) $rs('schedule_timezone', ''),
@@ -532,6 +550,58 @@ function devdredi_ability_apply_spec($rid, $spec, $all)
     }
     if ($has('skip_bots')) {
         $ws('skip_bots', !empty($get('skip_bots', true)) ? 1 : 0);
+    }
+    if ($has('skip_old_browsers')) {
+        $ws('skip_old_browsers', !empty($get('skip_old_browsers', false)) ? 1 : 0);
+    }
+    // Never Redirect lists (1.5.5): an entry the cleaner drops is refused, so an agent never believes a bad entry was saved.
+    foreach (array('skip_ips' => array('never_ips', 'devdredi_never_clean_ips', "\n"), 'skip_user_agents' => array('never_uas', 'devdredi_never_clean_uas', "\n"), 'skip_roles' => array('never_roles', 'devdredi_never_clean_roles', ',')) as $never_prop => $never_def) {
+        if (!$has($never_prop)) {
+            continue;
+        }
+        $never_in = array();
+        $never_bad = false;
+        foreach ((array) $get($never_prop, array()) as $never_item) {
+            // Each entry must survive its cleaner UNCHANGED in meaning: blank, over-long, tagged or misspelt entries are refused, not repaired.
+            $never_one = is_string($never_item) ? call_user_func($never_def[1], array($never_item)) : '';
+            if ($never_one === '' || ($never_prop !== 'skip_ips' && $never_one !== $never_item)) {
+                $never_bad = true;
+                break;
+            }
+            $never_in[] = $never_item;
+        }
+        $never_clean = call_user_func($never_def[1], $never_in);
+        $never_kept = ($never_clean === '') ? 0 : count(explode($never_def[2], $never_clean));
+        if ($never_bad || $never_kept !== count($never_in)) {
+            /* translators: %s: the name of the setting, for example skip_ips */
+            return new WP_Error('devdredi_bad_input', sprintf(__('%s holds an entry that is not valid, a duplicate, or too many entries; nothing was changed.', 'devdome-redirect-manager'), $never_prop));
+        }
+        $ws($never_def[0], $never_clean);
+        $ws($never_def[0] . '_enabled', $never_clean === '' ? 0 : 1); // for an agent the list is the switch: entries = on, empty = off
+    }
+    if ($has('visitor_check')) {
+        $ws('visitor_check', !empty($get('visitor_check', false)) ? 1 : 0);
+    }
+    if ($has('referrer_utm_scan')) {
+        $ws('referrer_utm_scan', !empty($get('referrer_utm_scan', false)) ? 1 : 0);
+    }
+    if ($has('daily_limit_enabled')) {
+        $ws('daily_limit_enabled', !empty($get('daily_limit_enabled', false)) ? 1 : 0);
+    }
+    if ($has('daily_limit_min') || $has('daily_limit_max')) {
+        // Same clean-up as the settings screen: whole numbers, capped, lower never above upper. Today's count is kept.
+        $dl_max = min(100000000, max(0, (int) $get('daily_limit_max', $all ? 0 : $cur('daily_limit_max', 0))));
+        $dl_min = min(100000000, max(0, (int) $get('daily_limit_min', $all ? 0 : $cur('daily_limit_min', 0))));
+        if ($dl_max > 0 && $dl_min > $dl_max) {
+            $dl_min = $dl_max;
+        }
+        // A changed range re-picks today's limit and keeps today's count; sending the same numbers again changes nothing.
+        $dl_saved = isset($GLOBALS['devdredi_rule']) ? $GLOBALS['devdredi_rule'] : null;
+        $GLOBALS['devdredi_rule'] = $rid;
+        devdredi_daily_limit_range_changed((int) $cur('daily_limit_min', 0), (int) $cur('daily_limit_max', 0), $dl_min, $dl_max);
+        $GLOBALS['devdredi_rule'] = $dl_saved;
+        $ws('daily_limit_min', $dl_min);
+        $ws('daily_limit_max', $dl_max);
     }
     if ($has('outside_only')) {
         $ws('outside_only', !empty($get('outside_only', false)) ? 1 : 0);
@@ -1057,7 +1127,7 @@ function devdredi_ability_create($input = array())
         'rotation' => 'sequential', 'rotation_repeat' => true, 'weighted_spread' => 0.5, 'weighted_seed' => 0,
         'open_mode' => 'same_tab', 'same_tab_delay' => array(0, 0), 'new_tab_delay' => array(0, 0), 'same_tab_require_click' => false,
         'same_tab_after_click_delay' => array(0, 0), 'new_tab_after_click_delay' => array(0, 0),
-        'once_per' => 'never', 'every_nth_visitor' => 1, 'revisit_delay' => 0, 'revisit_delay_unit' => 'minutes', 'skip_bots' => true, 'outside_only' => false,
+        'once_per' => 'never', 'every_nth_visitor' => 1, 'revisit_delay' => 0, 'revisit_delay_unit' => 'minutes', 'skip_bots' => true, 'skip_old_browsers' => false, 'skip_ips' => array(), 'skip_user_agents' => array(), 'skip_roles' => array(), 'visitor_check' => false, 'daily_limit_enabled' => false, 'daily_limit_min' => 0, 'daily_limit_max' => 0, 'referrer_utm_scan' => false, 'outside_only' => false,
         'schedule_mode' => 'always', 'schedule_timezone' => '', 'schedule_start_date' => '', 'schedule_end_date' => '',
         'schedule_weekdays' => array(), 'schedule_times' => array(), 'run_for_minutes' => 0,
         'geo_enabled' => false, 'geo_mode' => 'allow', 'geo_countries' => array(), 'trust_proxy' => false,
@@ -1147,6 +1217,20 @@ function devdredi_ability_update($input = array())
     $geo_on  = !empty($input['geo_enabled']) || (!empty($input['geo_countries']) && !array_key_exists('geo_enabled', $input));
     if ($geo_on && !$geo_now && empty($input['confirm'])) {
         return new WP_Error('devdredi_confirm_required', __('Geo targeting sends each visitor\'s IP address to the DevDome geo service (api.devdome.com) to resolve the country. Pass confirm: true after the user agreed.', 'devdome-redirect-manager'));
+    }
+    // Lowering protection needs the user's yes too (1.5.4): switching Visitor Check or Outdated Browsers off lets hidden bots through again.
+    foreach (array('visitor_check', 'skip_old_browsers') as $guard) {
+        if (!array_key_exists($guard, $input) || !empty($input[$guard]) || !empty($input['confirm'])) {
+            continue;
+        }
+        unset($GLOBALS['devdredi_read_failed']);
+        $guard_on = devdredi_ability_rs($rid, $guard, 0);
+        if (!empty($GLOBALS['devdredi_read_failed'])) { // a failed read is not "off": never let it wave the change through
+            return new WP_Error('devdredi_db_read', __('The rule could not be read (database error); nothing was changed.', 'devdome-redirect-manager'));
+        }
+        if ($guard_on) {
+            return new WP_Error('devdredi_confirm_required', __('This switches a bot protection off for the rule. Pass confirm: true after the user agreed.', 'devdome-redirect-manager'));
+        }
     }
     unset($input['confirm']);
     $GLOBALS['devdredi_write_failed'] = false; // from the first write (the name) on

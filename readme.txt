@@ -4,19 +4,19 @@ Tags: redirect, redirects, link rotator, geotargeting, 301 redirect
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.5.3
+Stable tag: 1.5.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Redirects with link rotation, geo and device targeting, scheduling, multiple redirect methods and per-rule statistics.
+Manage redirects with link rotation, geo and device targeting, visitor checks, daily limits, UTM source matching and per-rule statistics.
 
 == Description ==
 
-DevDome Redirect Manager lets you build redirect rules and point traffic wherever you need it: a single destination, a rotating list of URLs, a link already on the page, or the same path on another domain. Each rule has its own targeting, timing, schedule and statistics, and you can run as many rules side by side as you like.
+DevDome Redirect Manager sends visitors to a destination URL, a rotating list of links, a link on the page, or the same path on another domain. Each rule has its own targeting, schedule and statistics.
 
-Everything is configured from one screen (Tools language aside, no coding). Rules are independent: when a request comes in, the highest-priority running rule that matches handles it.
+Configure everything from one screen without coding. The highest-priority running rule that matches handles the request.
 
-Every feature is free and unlimited: unlimited rules, geo targeting, device targeting, scheduling, rotation and per-rule statistics. There is no paid tier of this plugin.
+All features are free. Create unlimited rules with no paid tier.
 
 = What you can do =
 
@@ -26,15 +26,22 @@ Every feature is free and unlimited: unlimited rules, geo targeting, device targ
 * Rotate through multiple destinations in order (first to last), randomly, or with a weighted "click distribution" you control with a slider.
 * Control how often a visitor is redirected: every visit, once per visitor, or again only after a delay you set (minutes/hours/days). Recognise a returning visitor by IP, or by IP + browser/device.
 * Redirect only every N-th unique visitor.
-* Only visitors arriving from outside: redirect visitors who land from another website or with no referrer, not those moving between your own pages. Also available to AI agents as the outside_only ability field.
-* Known bots are never redirected: crawlers, monitors and scrapers see the page as usual and only real visitors are redirected (on by default, one checkbox to turn off).
+* Redirect only visitors arriving from outside your site, including visits with no referrer.
+* Match referring websites, with optional UTM source matching for tagged links from apps and other sources that send no referrer.
+* Skip redirects for recognised bots and exclude them from visitor counts (on by default).
+* Skip redirects for browsers reporting older desktop versions with the optional Outdated Browsers setting.
+* Skip redirects for listed IP addresses and ranges, browser strings (User-Agent) and logged-in user roles, such as your own address or Administrator.
+* Require the same IP address and browser to continue a JavaScript redirect to provided links or the same path on another domain.
+* Set a daily redirect limit per rule, fixed or randomly chosen within a range.
 * Open the destination in the same tab or a new tab (JavaScript method), with optional instant or randomized delays, and an optional "wait for a click" step.
 * Target by device: desktop, mobile, tablet.
 * Target by country with an optional geo filter (include only listed countries, or redirect everyone except listed countries).
 * Schedule rules: always active, or a custom schedule with a run time, specific weekdays, and specific time windows.
 * Decide what happens to visitors who do not match a rule: leave them on the page, or send them to a bypass link.
 * Run multiple rules with drag-to-order priority; add, duplicate, delete, start and stop each one independently.
-* See per-rule statistics, export every rule to a file, and import them back.
+* See per-rule statistics and a Bots Skipped dashboard total. Export every rule to a file and import them back.
+
+Visitor Check, Outdated Browsers, Daily Redirect Limit and UTM source matching are off by default. All four run on your site without an external service. The new dashboard count and developer hooks also run locally.
 
 = Redirect Setup =
 
@@ -44,7 +51,9 @@ Every feature is free and unlimited: unlimited rules, geo targeting, device targ
 * **Selected existing URLs** - search your Categories, Pages and Posts and add them with a live picker (chips with per-item hit counts; drag to set priority for the "found" mode).
 * **Custom URLs** - type exact paths, one per line (for example `/blog/` or `/blog/best-headphones/`), whether the page exists or not. A trailing slash matches that page and everything under it.
 * **All 404's** - the rule runs on every not-found page (handy for catching dead links).
-* **Referring websites** - the rule runs only for visitors who arrive from the websites you list. A domain (reddit.com) covers that site and its subdomains, a word (reddit) covers every referring site whose address contains it. Visitors whose browser sends no referrer, and visitors coming from your own site, are never redirected by such a rule. Tick Only on selected pages to redirect them only on the categories, pages or posts you pick.
+* **Referring websites** - match the websites you list against the browser's referrer. A domain (reddit.com) covers that site and its subdomains. A word (reddit) matches referring addresses containing it. Without UTM source matching, visits with no referrer or an internal referrer do not match. Tick "Only on selected pages" to restrict the rule to chosen categories, pages or posts.
+
+**UTM Source** - "Also match the link's UTM source" lets a Referring websites rule also match tagged links. For a listed source of reddit.com, both `?utm_source=reddit.com` and `?utm_source=reddit` match, even without a referrer. Anyone can set this label. It does not verify where a visitor came from.
 
 **Redirect Method** - JavaScript Redirect, 301 Permanent, 302 Temporary, 307 Temporary, 308 Permanent, or Meta Refresh. New-tab opening and client-side delays are available with the JavaScript method only; server and meta methods always open in the same tab.
 
@@ -58,7 +67,13 @@ Every feature is free and unlimited: unlimited rules, geo targeting, device targ
 
 **How often to redirect** - Every visit, Once per visitor, or After a delay. When it is not "every visit", you choose how a returning visitor is identified (IP address, or IP + browser/device), can redirect only every N-th unique visitor, and (for the delay option) set the gap before the same visitor is redirected again.
 
-**Known Bots** - "Don't redirect known bots" (on by default) keeps crawlers, monitors and scrapers on the page; only real visitors are redirected, so a search engine keeps indexing the page. The check uses a built-in list of user-agent tokens; no external service is called.
+**Known Bots** - "Don't redirect known bots" is on by default. Requests matching the local bot checks are not redirected, sent to the bypass link or counted as visitors. The checks use built-in browser identifiers and any shared DevDome bot data already stored locally. This build downloads no bot feeds. Unrecognised bots can still be redirected.
+
+**Outdated Browsers** - "Don't redirect outdated browsers" skips reported Chrome/Chromium versions below 125, except 109, and Firefox versions below 125, except 115. Edge is checked through its Chrome version identifier. Browser identifiers containing Mobile, Android, iPhone or iPad are excluded from this check. Older versions can belong to real visitors.
+
+**Visitor Check** - "Require the same IP address to continue" checks that a single-use pass returns from the same IP address and browser. It works only with JavaScript redirects to provided links or the same path on another domain. It does not apply to links found on the page. Privacy: the pass record stays in your database with a keyed hash of the visitor's IP address and browser, never those raw values. It is deleted when used and expires within minutes, with extra time for configured delays.
+
+**Daily Redirect Limit** - "Limit redirects per day" sets a cap for each rule. Enter two positive whole numbers: the daily cap is chosen randomly between them. Use the same number twice for a fixed cap. A redirect is counted when the rule makes it, not when someone reaches the destination. With Visitor Check on, it is counted when the visitor's pass is accepted, so a page that is only loaded costs nothing.
 
 = Open Link Settings =
 
@@ -83,14 +98,24 @@ See the External services section below for what the geo filter sends and where.
 * **Purge Page Cache On Save** - clear cached copies of the pages a rule targets when you save/run it, so the redirect takes effect immediately. Works with WP Rocket, LiteSpeed Cache, W3 Total Cache, WP Super Cache, WP Fastest Cache, SiteGround Optimizer, WP-Optimize, Cache Enabler, Hummingbird and Breeze.
 * **Not Redirected Visitors** - Leave On Page (do nothing), or Send To Bypass Link (send non-matching visitors to a URL you choose).
 * **Schedule Mode** - Always Active, or Custom Schedule with a run time, selected weekdays, and up to three specific time windows.
+* **Excluded IP Addresses** - one IPv4 or IPv6 address or CIDR range per line, such as your own address. It cannot stop bots that change address on every visit.
+* **Excluded Browser Strings** - skips visitors whose browser string (User-Agent) contains any listed text, ignoring upper and lower case. Entries under 5 characters are not saved.
+* **Excluded User Roles** - skips logged-in users with a ticked role. A page cache may still serve a stored redirect.
+
+The three exclusions are per rule and off by default. Matching visitors see the page as usual and are counted with the skipped bots.
 
 = Rules, run state and statistics =
 
 * Add, duplicate, delete and reorder rules; each rule has its own nickname and priority.
 * Start a rule with "Save & Run", stop it with "Stop"; a live status shows Running/Stopped, run time and time left.
 * "Save Settings" saves without changing the run state; "Return to Default" resets the current rule's settings.
-* Each rule keeps its own statistics (visitors, page views, unique users, unique IPs, redirects, bypassed visitors, per-device and per-country counts, and per-source/destination breakdowns), with a time-range filter. "Reset Stats" clears the current rule's counters and rotation position.
+* Each rule keeps its own statistics (visitors, page views, unique users, unique IPs, redirects, bypassed visitors, per-device and per-country counts, and per-source/destination breakdowns), with a time-range filter. "Reset Stats" clears the current rule's statistics and rotation position, but not today's daily-limit count.
+* **Bots Skipped** shows skipped bot matches, outdated-browser matches, IP address, browser string and user role exclusions, and expired or mismatched Visitor Check passes. The DevDome dashboard totals these across rules. This is not a count of confirmed bots.
 * **Export** downloads all rules and their configuration to a JSON file (no stats, no run state). **Import** replaces every rule on the site with the rules from a file (imported rules arrive stopped).
+
+= Developer hooks =
+
+Use `devdredi_redirect_target` to filter destinations for provided links and same-path redirects. Use `devdredi_pass_bind_address` to filter the address a Visitor Check pass is bound to, for example a network range instead of the exact address. Use `devdredi_redirected` to respond to redirect events. Neither hook confirms arrival at the destination.
 
 == Installation ==
 
@@ -104,7 +129,7 @@ No account is required for the redirect features. The geo filter is optional and
 == Frequently Asked Questions ==
 
 = Does the redirect work without JavaScript? =
-Yes. Choose 301, 302, 307, 308 or Meta Refresh for a redirect that does not need JavaScript. The JavaScript method is only needed for new-tab opening, "wait for a click", and client-side delays. One exception: on a page served from a full-page cache, a Referring websites or Only visitors arriving from outside rule detects the landing with a small script, so those two need JavaScript on cached pages.
+Yes. Choose 301, 302, 307, 308 or Meta Refresh. JavaScript is needed for Visitor Check, new-tab opening, "wait for a click" and client-side delays. On fully cached pages, Referring websites and Only visitors arriving from outside rules also use JavaScript to detect the landing.
 
 = My redirect does not fire immediately after saving. Why? =
 A caching plugin or server cache may still be serving a stored copy of the page. Keep "Purge Page Cache On Save" enabled so the targeted pages are cleared when you save or run the rule.
@@ -115,21 +140,40 @@ Yes. Rules are independent and ordered by priority. For a given request, the hig
 = What does "Once per visitor" mean? =
 The visitor is redirected the first time only, and then left on the page on later visits, until you reset the rule's stats. Choose "After a delay" instead if you want the redirect to become available again after a set time. A visitor is identified by IP, or by IP + browser/device.
 
-= Are search engines and other bots redirected? =
-Not while "Don't redirect known bots" is ticked, which is the default. Crawlers, uptime monitors, scrapers and headless browsers are recognised by a built-in list of user-agent tokens (plus Spamhaus DROP addresses where the shared DevDome bot data is already present on the site; this build downloads none) and simply see the page. They are not redirected, not sent to the bypass link and not counted as visitors; the rule statistics show how many were skipped. Untick it if you really want bots redirected too.
+= Does the plugin recognise every bot? =
+No. "Don't redirect known bots" skips requests matching its local checks. Bots using unrecognised browser identifiers can still be redirected. Visitor Check compares the IP address and browser between two requests. It does not prove that a visitor is human.
+
+= Bots are inflating my affiliate or ad clicks. What should I switch on? =
+Keep "Don't redirect known bots" enabled. For supported JavaScript redirects, try Visitor Check. Consider Outdated Browsers if excluding older browsers suits your audience. These settings can reduce some automated redirects. They cannot prevent direct visits to the destination or guarantee valid clicks.
+
+= Will Visitor Check slow real visitors down? =
+It adds one request to your site before opening the destination, so some extra loading time is possible. There is no CAPTCHA. A visitor using the same IP address and browser continues automatically if the pass is still valid.
+
+= What happens if a visitor's network changes? =
+If the IP address or browser identifier changes between loading the page and returning the pass, the redirect is refused. The visitor sees an expired-link message asking them to go back and open the page again. This can happen to real visitors switching networks.
+
+= What happens when the daily limit is reached? =
+Further visitors handled by that rule stay on the page or go to its bypass link. A new daily allowance becomes available at midnight in the site's timezone, subject to the rule's schedule. Resetting statistics does not reset today's allowance.
 
 = Why is "New Tab" greyed out / reverting to "Same Tab"? =
 New-tab opening needs the JavaScript method. With a 301/302/307/308 or Meta Refresh method the redirect always happens in the same tab.
 
 = Does the geo filter send any data off my site? =
-Only when you enable Geo Filtering. See the External services section for exactly what is sent and where. With Geo Filtering off (the default), the plugin makes no external requests.
+Country lookups send visitor IP addresses to the geo service when Geo Filtering is enabled. "Test geo service" also contacts that service. The plugin catalog and optional account connection have separate external requests. See External services for details. The four new redirect settings run locally without an external service.
+
+= How do I stop being redirected on my own site? =
+Edit each rule that could redirect you. Under Optional Settings, tick "Don't redirect users with these roles", tick your role, such as Administrator or Editor, then save. This applies only while you are logged in. To skip redirects while logged out too, tick "Don't redirect these IP addresses or ranges" and add your public IPv4 or IPv6 address, one address or CIDR range per line. Update the entry if your public address changes; everyone sharing a listed address is also skipped. Matching visits stay on the page, never go to the bypass link and are counted with the skipped bots instead of visitors. Cached pages may still contain a redirect, so clear the page cache after saving if needed.
 
 = How do I move my rules to another site? =
 Use Export to download a JSON file of all rules, then Import on the other site. Imported rules arrive stopped, so you can review them before starting.
 
 = AI and Agent Support =
 
-On WordPress 6.9 and newer, DevDome Redirect Manager registers WordPress Abilities covering the whole plugin: list rules with their full configuration, rule details and statistics, 404 paths worth redirecting (with DevDome Link Monitor), search pages, posts and categories, geo service and proxy status, export the configuration, create a rule with every option (what to redirect, method, destinations and rotation, open mode and delays, frequency, schedule, geo, devices, fallback, custom domains), update, duplicate, reorder, start, stop and delete rules, reset a rule's statistics and purge page caches. Compatible AI agents and MCP clients can discover and use these abilities when the site exposes them, for example through the official WordPress MCP Adapter. New rules are created stopped unless the agent is told to start them; updates are all or nothing; delete and reset are marked destructive and require an explicit confirm flag. Every ability runs under the same administrator capability as the plugin screens.
+On WordPress 6.9+, compatible AI agents and MCP clients can use WordPress Abilities when your site exposes them, for example through the WordPress MCP Adapter. Abilities cover rule configuration, statistics, content search, 404 suggestions with DevDome Link Monitor, geo status, export and rule management. Administrator access is required.
+
+New fields are `skip_ips`, `skip_user_agents`, `skip_roles`, `visitor_check`, `skip_old_browsers`, `daily_limit_enabled`, `daily_limit_min`, `daily_limit_max` and `referrer_utm_scan`. A list entry that is not valid is refused and nothing is changed; a list with entries switches its exclusion on, an empty list switches it off. Statistics include `bots_skipped`. Agents must obtain user agreement and send `confirm: true` when turning an enabled Visitor Check or Outdated Browsers setting off. Turning Known Bots off does not currently require that flag.
+
+New rules start stopped unless requested otherwise. Updates are all or nothing. Enabling geo targeting, deleting rules and resetting statistics also require confirmation.
 
 == External services ==
 
@@ -157,8 +201,7 @@ These requests would be scheduled downloads of the lists themselves; no visitor 
 
 = Optional DevDome account connection (devdome.com and api.devdome.com) =
 
-The bundled DevDome library can link this site to a free DevDome account. This is optional and nothing is sent until you press the Connect button on the DevDome screen. Connecting opens `devdome.com` in your browser to sign in; after approval the plugin stores your public DevDome Account ID and a site token, and verifies the link against `https://api.devdome.com/plugin/account` (sending the site domain and the site token). Disconnecting sends the site domain and site token once to `https://api.devdome.com/plugin/disconnect` to unlink the site. No visitor data, content or redirect rules are sent.
-
+The bundled DevDome library can link this site to a free DevDome account. This is optional and nothing is sent until you press the Connect button on the DevDome screen. Connecting opens `devdome.com` in your browser to sign in; after approval the plugin stores your public DevDome Account ID and a site token, and verifies the link against `https://api.devdome.com/plugin/account` (sending the site domain and the site token). When you connect from the DevDome Tools dashboard, whose Connect card states this before you press the button, those account checks also send the slug and version of each active DevDome plugin plus the DevDome library, WordPress and PHP versions, so your account can show which of your sites run which DevDome plugins. Sites connected earlier, or from a button without that text, do not send the list. Disconnecting sends the site domain and site token once to `https://api.devdome.com/plugin/disconnect` to unlink the site. Disconnecting also stops the plugin list. No visitor data, content or redirect rules are sent.
 
 == Source code ==
 
@@ -180,6 +223,24 @@ Those two build inputs are not included in the distributed package. Ask for them
 
 == Changelog ==
 
+= 1.5.5 =
+* New per-rule exclusions under Optional Settings, each with its own checkbox and off by default: IP addresses and CIDR ranges (IPv4 and IPv6), browser strings (User-Agent), and logged-in WordPress user roles.
+* Excluded visitors see the page as usual, are not sent to the bypass link and are counted with the skipped bots instead of visitors.
+* Browser string exclusions match any listed text, ignoring upper and lower case. IP and browser string exclusions depend on the visitor continuing to match; role exclusions apply only while logged in, and cached pages may still be served.
+* The rule settings are also available to AI agents as `skip_ips`, `skip_user_agents` and `skip_roles`.
+* For developers: new `devdredi_pass_bind_address` filter for the address a Visitor Check pass is bound to.
+* Bundled DevDome library 1.7.6: the optional Connect card now says exactly what a connected site shares, including the list of active DevDome plugins. Sites already connected send nothing new. See External services.
+
+= 1.5.4 =
+* New "Require the same IP address to continue" checkbox (Visitor Check, off by default): a JavaScript redirect to a provided or transit destination continues only from the IP address and browser that opened the page. The destination no longer appears in the page; a single-use pass does, checked on your own site. A pass that comes back from another address is not redirected and is counted with the skipped bots.
+* New "Don't redirect outdated browsers" checkbox (off by default): desktop Chrome below version 125 (Edge is checked through its Chrome version) and Firefox below version 125, except versions 109 and 115, see the page as usual and are counted with the skipped bots.
+* New "Daily Redirect Limit" (off by default): the rule stops redirecting for the day once the limit is reached and starts again at midnight, site time. The limit is picked each day between two numbers; the same number twice is a fixed limit. Visitors over the limit stay on the page or go to the bypass link.
+* New "Also match the link's UTM source" checkbox for Referring websites (off by default): the rule also fires for a tagged link such as ?utm_source=reddit.com, for sources that send no referrer.
+* The DevDome dashboard tile and digest now also show Bots Skipped across all rules.
+* All of these are also available to AI agents as the `visitor_check`, `skip_old_browsers`, `daily_limit_enabled`, `daily_limit_min`, `daily_limit_max` and `referrer_utm_scan` rule fields. Switching `visitor_check` or `skip_old_browsers` off needs `confirm: true`.
+* For developers: new `devdredi_redirect_target` filter and `devdredi_redirected` action.
+* Reworded the Known Bots texts: the switch keeps automated traffic out of your redirects and statistics.
+
 = 1.5.3 =
 * Fixed: country targeting redirected nobody. The plugin asked the DevDome geo service through a call reserved for connected accounts and always got no country back; it now uses the open lookup, so allow and block country lists work again on every site.
 
@@ -187,7 +248,7 @@ Those two build inputs are not included in the distributed package. Ask for them
 * New "Only visitors arriving from outside" checkbox under What To Redirect (every scope except Referring websites, which already works this way): the rule redirects a visitor who lands on the page from another website or with no referrer at all, and leaves a visitor who moves between pages of this site on the page. Works on cached pages through the same small footer script as Referring websites. The create-redirect and update-redirect abilities accept outside_only and get-redirect returns it.
 
 = 1.5.1 =
-* New "Don't redirect known bots" checkbox under How Often To Redirect, on by default: crawlers, monitors and scrapers see the page as usual and are never redirected, so a search engine keeps indexing the page while only real visitors are sent on. Skipped bots are not counted as visitors and appear as Bots Skipped in the rule statistics. The create-redirect and update-redirect abilities accept skip_bots and get-redirect returns it together with bots_skipped.
+* New "Don't redirect known bots" checkbox under How Often To Redirect, on by default: crawlers, monitors and scrapers see the page as usual and are never redirected, so automated traffic stays out of your redirects and statistics. Skipped bots are not counted as visitors and appear as Bots Skipped in the rule statistics. The create-redirect and update-redirect abilities accept skip_bots and get-redirect returns it together with bots_skipped.
 
 = 1.5.0 =
 * What To Redirect: every option now carries a one-line hint under it, so the choice is clear without opening the info icon.

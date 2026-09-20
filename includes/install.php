@@ -31,6 +31,7 @@ function devdredi_activate()
 
     require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
     dbDelta($sql);
+    devdredi_pass_install();
 
     $default_settings = array(
         'run_mode' => 'unlimited',
