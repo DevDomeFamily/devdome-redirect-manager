@@ -1,6 +1,6 @@
-=== DevDome Redirect Manager – Redirects, Link Rotation & Geo Targeting ===
+=== DevDome Redirect Manager: Redirector, Link Rotator & Geo Redirect ===
 Contributors: devdome
-Tags: redirect, redirects, link rotator, geotargeting, 301 redirect
+Tags: redirector, url rotator, link rotator, geo redirect, geotargeting
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
@@ -8,114 +8,126 @@ Stable tag: 1.5.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Manage redirects with link rotation, geo and device targeting, visitor checks, daily limits, UTM source matching and per-rule statistics.
+Redirect manager and URL rotator with 302 redirects, same-path domain forwarding, country targeting via IP lookup and per-rule statistics.
 
 == Description ==
 
-DevDome Redirect Manager sends visitors to a destination URL, a rotating list of links, a link on the page, or the same path on another domain. Each rule has its own targeting, schedule and statistics.
+DevDome Redirect Manager handles URL redirect rules for your entire site, selected content, custom paths or 404 pages. Send visitors to a destination URL, a rotating list, a link on the page or the same path on another domain, with separate targeting, schedules and statistics for each rule. Configure everything from one screen without coding; all features are free, with unlimited rules and no paid tier.
 
-Configure everything from one screen without coding. The highest-priority running rule that matches handles the request.
+= Redirect Setup: choose what to redirect =
 
-All features are free. Create unlimited rules with no paid tier.
+Use this redirector for a page redirect, post redirect or category redirect, or select your entire website for a site redirect. The highest-priority running rule that matches handles the request.
 
-= What you can do =
+Under **What To Redirect**, choose:
 
-* Redirect your entire site, only selected pages/posts/categories, a list of custom URL paths, or every 404 (not-found) page.
-* Choose the redirect method per rule: JavaScript, 301 (permanent), 302 (temporary), 307, 308, or HTML meta refresh.
-* Send traffic to a list of destination URLs, to a link/button already present on the page, or to the same path on a different domain.
-* Rotate through multiple destinations in order (first to last), randomly, or with a weighted "click distribution" you control with a slider.
-* Control how often a visitor is redirected: every visit, once per visitor, or again only after a delay you set (minutes/hours/days). Recognise a returning visitor by IP, or by IP + browser/device.
-* Redirect only every N-th unique visitor.
-* Redirect only visitors arriving from outside your site, including visits with no referrer.
-* Match referring websites, with optional UTM source matching for tagged links from apps and other sources that send no referrer.
-* Skip redirects for recognised bots and exclude them from visitor counts (on by default).
-* Skip redirects for browsers reporting older desktop versions with the optional Outdated Browsers setting.
-* Skip redirects for listed IP addresses and ranges, browser strings (User-Agent) and logged-in user roles, such as your own address or Administrator.
-* Require the same IP address and browser to continue a JavaScript redirect to provided links or the same path on another domain.
-* Set a daily redirect limit per rule, fixed or randomly chosen within a range.
-* Open the destination in the same tab or a new tab (JavaScript method), with optional instant or randomized delays, and an optional "wait for a click" step.
-* Target by device: desktop, mobile, tablet.
-* Target by country with an optional geo filter (include only listed countries, or redirect everyone except listed countries).
-* Schedule rules: always active, or a custom schedule with a run time, specific weekdays, and specific time windows.
-* Decide what happens to visitors who do not match a rule: leave them on the page, or send them to a bypass link.
-* Run multiple rules with drag-to-order priority; add, duplicate, delete, start and stop each one independently.
-* See per-rule statistics and a Bots Skipped dashboard total. Export every rule to a file and import them back.
+* **Entire website** - runs on every public page for a website redirect.
+* **Selected existing URLs** - search Categories, Pages and Posts with a live picker. Selected items appear as chips with per-item hit counts; drag them to set priority for the "found" mode.
+* **Custom URLs** - enter exact paths, one per line, such as `/blog/` or `/blog/best-headphones/`, whether the page exists or not. A trailing slash matches that page and everything under it.
+* **All 404's** - runs on every not-found page to catch dead links. For a 404 to homepage rule, set your homepage as the destination.
+* **Referring websites** - match listed websites against the browser's referrer. A domain such as reddit.com covers that site and its subdomains; a word such as reddit matches referring addresses containing it. Without UTM source matching, visits with no referrer or an internal referrer do not match. "Only on selected pages" restricts the rule to chosen categories, pages or posts.
 
-Visitor Check, Outdated Browsers, Daily Redirect Limit and UTM source matching are off by default. All four run on your site without an external service. The new dashboard count and developer hooks also run locally.
+For a homepage redirect, target the homepage through Selected existing URLs. To make short links, manually choose a custom path and its destination: a short URL or vanity URL uses a path you supply, without generated slugs.
 
-= Redirect Setup =
+= Referring websites and UTM Source =
 
-**What To Redirect**
+"Only visitors arriving from outside" redirects external arrivals, including visits with no referrer, while leaving visitors moving between your own pages on the page.
 
-* **Entire website** - the rule runs on every public page.
-* **Selected existing URLs** - search your Categories, Pages and Posts and add them with a live picker (chips with per-item hit counts; drag to set priority for the "found" mode).
-* **Custom URLs** - type exact paths, one per line (for example `/blog/` or `/blog/best-headphones/`), whether the page exists or not. A trailing slash matches that page and everything under it.
-* **All 404's** - the rule runs on every not-found page (handy for catching dead links).
-* **Referring websites** - match the websites you list against the browser's referrer. A domain (reddit.com) covers that site and its subdomains. A word (reddit) matches referring addresses containing it. Without UTM source matching, visits with no referrer or an internal referrer do not match. Tick "Only on selected pages" to restrict the rule to chosen categories, pages or posts.
+**UTM Source** - "Also match the link's UTM source" lets a Referring websites rule match tagged links from apps and other sources without a referrer. For a listed source of reddit.com, both `?utm_source=reddit.com` and `?utm_source=reddit` match. Anyone can set this label; it does not verify where a visitor came from.
 
-**UTM Source** - "Also match the link's UTM source" lets a Referring websites rule also match tagged links. For a listed source of reddit.com, both `?utm_source=reddit.com` and `?utm_source=reddit` match, even without a referrer. Anyone can set this label. It does not verify where a visitor came from.
+= Redirect Method and URL forwarding =
 
-**Redirect Method** - JavaScript Redirect, 301 Permanent, 302 Temporary, 307 Temporary, 308 Permanent, or Meta Refresh. New-tab opening and client-side delays are available with the JavaScript method only; server and meta methods always open in the same tab.
+Choose **JavaScript Redirect**, **301 Permanent**, **302 Temporary**, **307 Temporary**, **308 Permanent** or **Meta Refresh** per rule. Use a 301 redirect for permanent redirection or a 302 redirect for temporary URL forwarding. New-tab opening and client-side delays require JavaScript; server and meta methods always open in the same tab.
 
-**Where To Send Traffic**
+Under **Where To Send Traffic**, choose:
 
-* **To provided links** - enter one or more destination URLs and rotate through them.
-* **To links or buttons on the page** - enter a fragment (for example `amazon.com`) and the rule redirects to the matching link/button already on the page. You can target the N-th match.
-* **To same path on another domain** - keep the visitor's path and query and send it to another domain (for example `yoursite.com/post/123` becomes `otherdomain.com/post/123`).
+* **To provided links** - enter one or more destination URLs.
+* **To links or buttons on the page** - enter a fragment such as `amazon.com` to find a matching link/button already on the page. You can target the N-th match.
+* **To same path on another domain** - preserve the visitor's path and query for a domain redirect. For example, `yoursite.com/post/123` becomes `otherdomain.com/post/123`.
 
-**Link rotation** (provided links) - First to last, Random, or Weighted distribution. The weighted mode adds a Click Distribution slider (first link gets most, even split, or last link gets most) with a live preview. "Repeat List" starts again from the first URL once the list is exhausted.
+= Link rotation and traffic distribution =
 
-**How often to redirect** - Every visit, Once per visitor, or After a delay. When it is not "every visit", you choose how a returning visitor is identified (IP address, or IP + browser/device), can redirect only every N-th unique visitor, and (for the delay option) set the gap before the same visitor is redirected again.
+The URL rotator supports **First to last**, **Random** and **Weighted distribution** for provided links. The **Click Distribution** slider gives the first link most traffic, an even split or the last link most traffic, with a live preview. **Repeat List** restarts from the first URL when the list is exhausted.
 
-**Known Bots** - "Don't redirect known bots" is on by default. Requests matching the local bot checks are not redirected, sent to the bypass link or counted as visitors. The checks use built-in browser identifiers and any shared DevDome bot data already stored locally. This build downloads no bot feeds. Unrecognised bots can still be redirected.
+For basic AB testing or split testing of destinations, the rotator can split traffic between links. It does not measure conversions or determine a winning destination.
+
+= How often to redirect =
+
+Choose **Every visit**, **Once per visitor** or **After a delay**. For the latter two, recognise returning visitors by IP address or IP + browser/device, and optionally redirect only every N-th unique visitor. After a delay lets you set the gap in minutes, hours or days before redirecting the same visitor again.
+
+**Daily Redirect Limit** - "Limit redirects per day" sets a per-rule cap. Enter two positive whole numbers; the daily cap is chosen randomly between them. Use the same number twice for a fixed cap.
+
+A redirect counts when the rule makes it, not when someone reaches the destination. With Visitor Check enabled, it counts when the pass is accepted, so merely loading a page costs nothing.
+
+= Known Bots, Outdated Browsers and Visitor Check =
+
+**Known Bots** - "Don't redirect known bots" is on by default. Matching requests are not redirected, sent to the bypass link or counted as visitors. Local checks use built-in browser identifiers and any shared DevDome bot data already stored locally. This build downloads no bot feeds. Unrecognised bots can still be redirected.
 
 **Outdated Browsers** - "Don't redirect outdated browsers" skips reported Chrome/Chromium versions below 125, except 109, and Firefox versions below 125, except 115. Edge is checked through its Chrome version identifier. Browser identifiers containing Mobile, Android, iPhone or iPad are excluded from this check. Older versions can belong to real visitors.
 
-**Visitor Check** - "Require the same IP address to continue" checks that a single-use pass returns from the same IP address and browser. It works only with JavaScript redirects to provided links or the same path on another domain. It does not apply to links found on the page. Privacy: the pass record stays in your database with a keyed hash of the visitor's IP address and browser, never those raw values. It is deleted when used and expires within minutes, with extra time for configured delays.
+**Visitor Check** - "Require the same IP address to continue" checks that a single-use pass returns from the same IP address and browser. It applies only to JavaScript redirects to provided links or the same path on another domain, not links found on the page.
 
-**Daily Redirect Limit** - "Limit redirects per day" sets a cap for each rule. Enter two positive whole numbers: the daily cap is chosen randomly between them. Use the same number twice for a fixed cap. A redirect is counted when the rule makes it, not when someone reaches the destination. With Visitor Check on, it is counted when the visitor's pass is accepted, so a page that is only loaded costs nothing.
+The pass record stays in your database with a keyed hash of the visitor's IP address and browser, never those raw values. It is deleted when used and expires within minutes, with extra time for configured delays.
 
-= Open Link Settings =
+Visitor Check, Outdated Browsers, Daily Redirect Limit and UTM source matching are off by default. All four run locally without an external service, as do the dashboard count and developer hooks.
 
-* **Open Link In** - Same Tab or New Tab (New Tab requires the JavaScript method).
-* **Same Tab Link Delay** - instant, or a random delay (seconds) within a range.
-* **Redirect On Click** - wait for the visitor to click/tap anywhere before redirecting, instead of redirecting automatically.
-* **After Click Delay** - after the click, wait a random time (up to 4 seconds) before redirecting.
-* **New Tab Link Delay** - instant or a random delay before the new tab is armed. A new tab can only open on a real click, so the destination opens on the visitor's next click after the delay (browsers block tabs that open by themselves).
+= Open Link Settings: automatic redirect or click =
 
-= Geo Filter Settings =
+Choose an automatic redirect or wait for a visitor's click. For an auto redirect with a delay, use the JavaScript method and configure the timing below.
 
-* **Test geo service** - confirm the geo service is reachable from your server before you rely on it.
-* **Geo Filtering** - turn the country filter on or off (off by default).
-* **Filter mode** - redirect only the listed countries, or redirect everyone except the listed countries. If the visitor's country cannot be resolved, an "except listed" (blacklist) rule does not redirect that visitor (it fails safe).
-* **Site Behind Proxy / CDN** - if your site sits behind Cloudflare or another proxy, enable "Trust forwarded IP headers" so the real visitor IP is used for country lookup. "Detect automatically" inspects the current request and ticks the box for you.
+* **Open Link In** - Same Tab or New Tab. New Tab requires JavaScript.
+* **Same Tab Link Delay** - instant or a random delay in seconds within a range.
+* **Redirect On Click** - wait for a click/tap anywhere before redirecting.
+* **After Click Delay** - wait a random time up to 4 seconds after the click.
+* **New Tab Link Delay** - instant or a random delay before the new tab is armed. The destination opens on the visitor's next real click after that delay because browsers block tabs that open by themselves.
 
-See the External services section below for what the geo filter sends and where.
+= Geo Filter Settings: country redirect and geolocation =
 
-= Optional Settings =
+Use geotargeting for a country redirect based on IP geolocation. This GeoIP lookup supplies a country code for geo targeting; a geo IP redirect can include or exclude listed countries.
 
-* **Devices to Redirect** - redirect only the checked device types (Desktop / Mobile / Tablet); other devices follow your "Not Redirected Visitors" setting.
-* **Purge Page Cache On Save** - clear cached copies of the pages a rule targets when you save/run it, so the redirect takes effect immediately. Works with WP Rocket, LiteSpeed Cache, W3 Total Cache, WP Super Cache, WP Fastest Cache, SiteGround Optimizer, WP-Optimize, Cache Enabler, Hummingbird and Breeze.
-* **Not Redirected Visitors** - Leave On Page (do nothing), or Send To Bypass Link (send non-matching visitors to a URL you choose).
-* **Schedule Mode** - Always Active, or Custom Schedule with a run time, selected weekdays, and up to three specific time windows.
-* **Excluded IP Addresses** - one IPv4 or IPv6 address or CIDR range per line, such as your own address. It cannot stop bots that change address on every visit.
-* **Excluded Browser Strings** - skips visitors whose browser string (User-Agent) contains any listed text, ignoring upper and lower case. Entries under 5 characters are not saved.
-* **Excluded User Roles** - skips logged-in users with a ticked role. A page cache may still serve a stored redirect.
+* **Test geo service** - check that the service is reachable from your server before relying on it.
+* **Geo Filtering** - enable or disable the country filter; off by default.
+* **Filter mode** - redirect only listed countries or everyone except them. If the country cannot be resolved, an "except listed" blacklist rule does not redirect that visitor.
+* **Site Behind Proxy / CDN** - behind Cloudflare or another proxy, enable "Trust forwarded IP headers" to use the real visitor IP for country lookup. "Detect automatically" inspects the current request and ticks the box for you.
 
-The three exclusions are per rule and off by default. Matching visitors see the page as usual and are counted with the skipped bots.
+See External services for what a geo redirect sends and where.
 
-= Rules, run state and statistics =
+= Optional Settings: devices, cache and schedules =
 
-* Add, duplicate, delete and reorder rules; each rule has its own nickname and priority.
-* Start a rule with "Save & Run", stop it with "Stop"; a live status shows Running/Stopped, run time and time left.
-* "Save Settings" saves without changing the run state; "Return to Default" resets the current rule's settings.
-* Each rule keeps its own statistics (visitors, page views, unique users, unique IPs, redirects, bypassed visitors, per-device and per-country counts, and per-source/destination breakdowns), with a time-range filter. "Reset Stats" clears the current rule's statistics and rotation position, but not today's daily-limit count.
-* **Bots Skipped** shows skipped bot matches, outdated-browser matches, IP address, browser string and user role exclusions, and expired or mismatched Visitor Check passes. The DevDome dashboard totals these across rules. This is not a count of confirmed bots.
-* **Export** downloads all rules and their configuration to a JSON file (no stats, no run state). **Import** replaces every rule on the site with the rules from a file (imported rules arrive stopped).
+* **Devices to Redirect** - select Desktop, Mobile or Tablet. For a mobile redirect, check Mobile; other devices follow **Not Redirected Visitors**.
+* **Purge Page Cache On Save** - clear cached copies of targeted pages when saving/running a rule so it takes effect immediately. Supports WP Rocket, LiteSpeed Cache, W3 Total Cache, WP Super Cache, WP Fastest Cache, SiteGround Optimizer, WP-Optimize, Cache Enabler, Hummingbird and Breeze.
+* **Not Redirected Visitors** - Leave On Page or Send To Bypass Link, using a URL you choose.
+* **Schedule Mode** - Always Active or Custom Schedule, with a run time, selected weekdays and up to three specific time windows.
+
+= Optional Settings: visitor exclusions =
+
+Exclude your own address, selected browsers or logged-in roles such as Administrator.
+
+* **Excluded IP Addresses** - one IPv4 or IPv6 address or CIDR range per line. This cannot stop bots that change address on every visit.
+* **Excluded Browser Strings** - skip User-Agent strings containing listed text, ignoring upper and lower case. Entries under 5 characters are not saved.
+* **Excluded User Roles** - skip logged-in users with a ticked role. A page cache may still serve a stored redirect.
+
+All three exclusions are per rule and off by default. Matching visitors see the page as usual and are counted with skipped bots.
+
+= Rules, run state and link tracking =
+
+Add, duplicate, delete, start and stop rules independently. Each has a nickname and priority; drag rules to reorder redirections.
+
+* **Save & Run** starts a rule; **Stop** stops it. Live status shows Running/Stopped, run time and time left.
+* **Save Settings** saves without changing run state. **Return to Default** resets the current rule's settings.
+* **Reset Stats** clears the current rule's statistics and rotation position, but not today's daily-limit count.
+* **Export** downloads every rule and its configuration as JSON, without statistics or run state. **Import** replaces every rule on the site; imported rules arrive stopped.
+
+Each rule records visitors, page views, unique users, unique IPs, redirects, bypassed visitors, device and country counts, and source/destination breakdowns, with a time-range filter. As a link tracker, it provides link tracking for rule activity, not confirmation that visitors reached a destination.
+
+**Bots Skipped** includes bot matches, outdated-browser matches, IP address, browser string and user role exclusions, and expired or mismatched Visitor Check passes. The DevDome dashboard totals these across rules. It is not a count of confirmed bots.
 
 = Developer hooks =
 
-Use `devdredi_redirect_target` to filter destinations for provided links and same-path redirects. Use `devdredi_pass_bind_address` to filter the address a Visitor Check pass is bound to, for example a network range instead of the exact address. Use `devdredi_redirected` to respond to redirect events. Neither hook confirms arrival at the destination.
+* `devdredi_redirect_target` filters destinations for provided links and same-path redirects.
+* `devdredi_pass_bind_address` filters the address a Visitor Check pass is bound to, for example a network range instead of an exact address.
+* `devdredi_redirected` responds to redirect events.
+
+These hooks do not confirm arrival at the destination.
 
 == Installation ==
 
@@ -128,46 +140,67 @@ No account is required for the redirect features. The geo filter is optional and
 
 == Frequently Asked Questions ==
 
-= Does the redirect work without JavaScript? =
-Yes. Choose 301, 302, 307, 308 or Meta Refresh. JavaScript is needed for Visitor Check, new-tab opening, "wait for a click" and client-side delays. On fully cached pages, Referring websites and Only visitors arriving from outside rules also use JavaScript to detect the landing.
+= Does the redirect work without JavaScript, and why is "New Tab" greyed out or reverting to "Same Tab"? =
+
+Choose 301, 302, 307, 308 or Meta Refresh to redirect without JavaScript. These methods always open in the same tab, so New Tab is unavailable.
+
+JavaScript is required for Visitor Check, new-tab opening, "wait for a click" and client-side delays. On fully cached pages, Referring websites and Only visitors arriving from outside rules also use JavaScript to detect the landing.
 
 = My redirect does not fire immediately after saving. Why? =
-A caching plugin or server cache may still be serving a stored copy of the page. Keep "Purge Page Cache On Save" enabled so the targeted pages are cleared when you save or run the rule.
+
+A caching plugin or server cache may still serve a stored copy of the page. Keep "Purge Page Cache On Save" enabled so targeted pages are cleared when you save or run the rule.
 
 = Can I run more than one rule at the same time? =
-Yes. Rules are independent and ordered by priority. For a given request, the highest-priority running rule that matches handles it.
+
+Yes. Rules are independent and ordered by priority. For each request, the highest-priority running rule that matches handles it.
 
 = What does "Once per visitor" mean? =
-The visitor is redirected the first time only, and then left on the page on later visits, until you reset the rule's stats. Choose "After a delay" instead if you want the redirect to become available again after a set time. A visitor is identified by IP, or by IP + browser/device.
 
-= Does the plugin recognise every bot? =
-No. "Don't redirect known bots" skips requests matching its local checks. Bots using unrecognised browser identifiers can still be redirected. Visitor Check compares the IP address and browser between two requests. It does not prove that a visitor is human.
+The visitor is redirected only the first time, then left on the page on later visits until you reset the rule's statistics. Choose "After a delay" to make the redirect available again after a set time. Visitors are identified by IP or IP + browser/device.
 
-= Bots are inflating my affiliate or ad clicks. What should I switch on? =
-Keep "Don't redirect known bots" enabled. For supported JavaScript redirects, try Visitor Check. Consider Outdated Browsers if excluding older browsers suits your audience. These settings can reduce some automated redirects. They cannot prevent direct visits to the destination or guarantee valid clicks.
+= Does the plugin recognise every bot, and what should I switch on if bots inflate affiliate or ad clicks? =
+
+No. "Don't redirect known bots" skips requests matching local checks, but bots with unrecognised browser identifiers can still be redirected. Visitor Check compares the IP address and browser between two requests; it does not prove that a visitor is human.
+
+Keep "Don't redirect known bots" enabled. For supported JavaScript redirects, try Visitor Check. Consider Outdated Browsers if excluding older browsers suits your audience. These settings can reduce some automated redirects, but cannot prevent direct visits to the destination or guarantee valid clicks.
 
 = Will Visitor Check slow real visitors down? =
+
 It adds one request to your site before opening the destination, so some extra loading time is possible. There is no CAPTCHA. A visitor using the same IP address and browser continues automatically if the pass is still valid.
 
 = What happens if a visitor's network changes? =
+
 If the IP address or browser identifier changes between loading the page and returning the pass, the redirect is refused. The visitor sees an expired-link message asking them to go back and open the page again. This can happen to real visitors switching networks.
 
 = What happens when the daily limit is reached? =
+
 Further visitors handled by that rule stay on the page or go to its bypass link. A new daily allowance becomes available at midnight in the site's timezone, subject to the rule's schedule. Resetting statistics does not reset today's allowance.
 
-= Why is "New Tab" greyed out / reverting to "Same Tab"? =
-New-tab opening needs the JavaScript method. With a 301/302/307/308 or Meta Refresh method the redirect always happens in the same tab.
-
 = Does the geo filter send any data off my site? =
-Country lookups send visitor IP addresses to the geo service when Geo Filtering is enabled. "Test geo service" also contacts that service. The plugin catalog and optional account connection have separate external requests. See External services for details. The four new redirect settings run locally without an external service.
+
+Country lookups send visitor IP addresses to the geo service when Geo Filtering is enabled. "Test geo service" also contacts that service. The plugin catalog and optional account connection have separate external requests. See External services for details.
+
+Visitor Check, Outdated Browsers, Daily Redirect Limit and UTM source matching run locally without an external service.
 
 = How do I stop being redirected on my own site? =
-Edit each rule that could redirect you. Under Optional Settings, tick "Don't redirect users with these roles", tick your role, such as Administrator or Editor, then save. This applies only while you are logged in. To skip redirects while logged out too, tick "Don't redirect these IP addresses or ranges" and add your public IPv4 or IPv6 address, one address or CIDR range per line. Update the entry if your public address changes; everyone sharing a listed address is also skipped. Matching visits stay on the page, never go to the bypass link and are counted with the skipped bots instead of visitors. Cached pages may still contain a redirect, so clear the page cache after saving if needed.
+
+Edit each rule that could redirect you. Under Optional Settings, tick "Don't redirect users with these roles", tick your role, such as Administrator or Editor, then save. This applies only while logged in.
+
+To skip redirects while logged out too, tick "Don't redirect these IP addresses or ranges" and add your public IPv4 or IPv6 address, one address or CIDR range per line. Update the entry if your public address changes. Everyone sharing a listed address is also skipped.
+
+Matching visits stay on the page, never go to the bypass link and are counted with skipped bots instead of visitors. Cached pages may still contain a redirect, so clear the page cache after saving if needed.
 
 = How do I move my rules to another site? =
+
 Use Export to download a JSON file of all rules, then Import on the other site. Imported rules arrive stopped, so you can review them before starting.
 
-= AI and Agent Support =
+= How do I set up 301 redirects when I change domain, change URL or change permalink? =
+
+For the redirect part of a site migration, choose "To same path on another domain" to use domain forwarding while preserving paths and queries. Configure 301 redirects for a permanent move.
+
+After you change URL paths or change permalink settings in WordPress, enter the old paths under Custom URLs and provide their new destinations. This sets up a link redirect from an old address; it does not change permalink settings or move your site's files and database.
+
+== AI and Agent Support ==
 
 On WordPress 6.9+, compatible AI agents and MCP clients can use WordPress Abilities when your site exposes them, for example through the WordPress MCP Adapter. Abilities cover rule configuration, statistics, content search, 404 suggestions with DevDome Link Monitor, geo status, export and rule management. Administrator access is required.
 

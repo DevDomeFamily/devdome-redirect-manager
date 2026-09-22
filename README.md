@@ -1,4 +1,6 @@
-# DevDome Redirect Manager - free WordPress redirects with geo targeting, device targeting, link rotation and scheduling
+# DevDome Redirect Manager: Redirector, Link Rotator & Geo Redirect
+
+Redirect manager and URL rotator with 302 redirects, same-path domain forwarding, country targeting via IP lookup and per-rule statistics. Configure independent rules without coding, with unlimited rules and no paid tier.
 
 [![WordPress Plugin Version](https://img.shields.io/wordpress/plugin/v/devdome-redirect-manager?label=wp.org)](https://wordpress.org/plugins/devdome-redirect-manager/)
 [![Active Installs](https://img.shields.io/wordpress/plugin/installs/devdome-redirect-manager)](https://wordpress.org/plugins/devdome-redirect-manager/)
@@ -7,9 +9,6 @@
 [![License GPL-2.0+](https://img.shields.io/badge/license-GPL--2.0%2B-blue.svg)](LICENSE)
 
 **The free alternative to Pretty Links Pro, ThirstyAffiliates Pro, 301 Redirects Pro and Yoast Premium redirects.**
-Redirect the whole site, selected pages, custom paths or every 404 with 301, 302, 307, 308, JavaScript or meta
-refresh. Every rule gets its own geo filter, device filter, schedule, rotation order and click statistics.
-Unlimited rules, no paid tier.
 
 [![DevDome Redirect Manager, free WordPress redirect plugin with geo and device targeting](https://ps.w.org/devdome-redirect-manager/assets/banner-1544x500.png)](https://devdome.com)
 
@@ -31,67 +30,85 @@ Unlimited rules, no paid tier.
 | Once per visitor, every N-th visitor | Yes | No | No | No | No | No |
 | Unlimited rules | Yes | Yes | Per plan | Per plan | Per plan | Yes |
 
+Prices reflect the existing September 2026 comparison. Split testing here means distributing traffic, without conversion measurement.
+
 Prices are the vendors' published plans in September 2026. Redirection is a good free 301 tool; it has no geo,
 device, rotation or scheduling. Rank Math includes redirects only as part of its full SEO suite.
 
 ## Features
 
-- **What to redirect:** the entire website, selected posts, pages and categories, a list of custom paths, or every
-  404 page.
-- **Where to:** one URL, a rotating list (first to last, random, or weighted with a slider), a link or button already
-  on the page, or the same path on another domain.
-- **Method:** 301, 302, 307, 308, JavaScript (with optional delay, new tab, or wait-for-click), meta refresh.
-- **Frequency:** every visit, once per visitor (by IP or IP plus device), or again after a delay you set; redirect
-  only every N-th unique visitor.
-- **Geo filter:** include only listed countries, or redirect everyone except them. Proxy and CDN aware.
-- **Device targeting:** desktop, mobile, tablet.
-- **Scheduling:** start and end date and time, your timezone.
-- **Statistics per rule**, purge page cache on save (WP Rocket, LiteSpeed, W3 Total Cache, WP Super Cache and
-  more), import and export.
-- **AI-agent ready:** every feature is exposed through the WordPress Abilities API and MCP, see below.
+### URL redirect rules and domain forwarding
+
+Use the redirector for a page redirect, post redirect or category redirect. Choose a homepage redirect, a whole-site redirect, or send every 404 to homepage. A website redirect can also match custom paths or referring websites, including optional UTM source matching.
+
+- **Methods:** 301 redirect for permanent redirection, 302 redirect for temporary url forwarding, plus 307, 308, JavaScript and meta refresh.
+- **Destinations:** one URL, multiple URLs, a matching link/button on the page, or a domain redirect preserving paths and queries.
+- **Migration:** when you change domain, use 301 redirects for the redirect portion of site migration. After you change url paths or change permalink settings, map old paths to new destinations with a link redirect. The plugin does not migrate files or change permalinks.
+- **Short links:** supply your own custom path for a short url or vanity url. Slugs are not generated.
+
+### Link rotation with a url rotator
+
+The link rotator sends visitors first to last, randomly, or by weighted distribution using a slider. Repeat the destination list when exhausted.
+
+For basic ab testing, split traffic between destinations; the plugin does not measure conversions or choose winners.
+
+### Country redirect, geo redirect and geotargeting
+
+Use geo targeting to include listed countries or everyone except them. A geo ip redirect uses IP geolocation, also called geoip lookup. The optional DevDome geo service receives visitor IP addresses when filtering is enabled; filtering defaults off.
+
+Proxy/CDN detection and trusted forwarded IP headers support country lookup behind proxies.
+
+### Mobile redirect, timing and schedules
+
+- **Devices:** desktop, mobile or tablet.
+- **Frequency:** every visit, once per visitor by IP or IP plus device, or again after a chosen delay; optionally every N-th unique visitor.
+- **Opening:** an automatic redirect or wait-for-click. JavaScript supports auto redirect delays and new tabs; new tabs require a real visitor click.
+- **Schedules:** start/end dates and times, timezone, weekdays and time windows.
+- **Filtering:** optional daily limits, visitor checks and IP, browser or role exclusions. Known-bot skipping defaults on but cannot identify every bot.
+
+### Redirect statistics and link tracking
+
+Each rule has priority, nickname, run state and statistics. Reorder redirections by dragging; the highest-priority matching running rule handles redirecting.
+
+As a link tracker, the plugin counts rule activity, including visitors, redirects, bypasses, devices, countries and source/destination breakdowns. Counts do not confirm destination arrival.
+
+Purge page cache on save with WP Rocket, LiteSpeed, W3 Total Cache, WP Super Cache and more. Export configurations as JSON; import replaces rules and leaves them stopped.
 
 ## AI agents and MCP (WordPress Abilities API)
 
-Since 1.4.0, on WordPress 6.9 and newer, DevDome Redirect Manager registers every feature of the plugin as
-[WordPress Abilities](https://developer.wordpress.org/apis/abilities-api/). Any AI agent or MCP client connected to
-the site through the official [WordPress MCP Adapter](https://github.com/WordPress/mcp-adapter) discovers them
-automatically, so you can ask Claude, ChatGPT or Cursor "create a 302 for /old-promo/ to the new landing page for
-US and Canadian mobile visitors, weekdays 9 to 17 Berlin time, but don't start it yet" and the agent fills in every
-option. Every ability runs the same code as the plugin screens and is guarded by the same administrator capability;
-nothing is exposed to anonymous requests.
+Since 1.4.0, WordPress 6.9+ exposes plugin features as [WordPress Abilities](https://developer.wordpress.org/apis/abilities-api/). Connected agents such as Claude, ChatGPT or Cursor discover them through the official [WordPress MCP Adapter](https://github.com/WordPress/mcp-adapter).
+
+Abilities use the same code and administrator permissions as plugin screens. Anonymous requests have no access.
 
 | Ability | What it does | Kind |
 |---|---|---|
-| `devdome-redirect-manager/list-redirects` | Every rule in priority order with its full configuration, state and statistics | read |
-| `devdome-redirect-manager/get-redirect-details` | One rule with per-source, per-destination, per-country and daily counts | read |
-| `devdome-redirect-manager/get-redirect-stats` | Totals across all rules (redirects, bypassed, page views, deduplicated unique visitors, devices) plus per-rule stats | read |
-| `devdome-redirect-manager/find-404-redirect-candidates` | 404 paths real visitors hit, with suggested targets (needs DevDome Link Monitor) | read |
-| `devdome-redirect-manager/search-site-content` | Find pages, posts and categories by title to use as sources | read |
-| `devdome-redirect-manager/get-geo-status` | Geo lookup service health and proxy / CDN detection | read |
-| `devdome-redirect-manager/export-redirects` | The full configuration as JSON, same as the Export button | read |
-| `devdome-redirect-manager/create-redirect` | Create a rule with every option: what to redirect, method, destinations and rotation, open mode and delays, frequency, schedule, geo, devices, fallback, custom domains. Created stopped unless `start: true` | add |
-| `devdome-redirect-manager/update-redirect` | Change any settings of a rule; all or nothing, a refused key leaves the rule untouched | modify |
-| `devdome-redirect-manager/set-redirect-state` | Start or stop a rule (Run / Stop buttons) | modify |
-| `devdome-redirect-manager/duplicate-redirect` | Copy a rule as "<name> copy", stopped, with zero statistics | add |
-| `devdome-redirect-manager/reorder-redirects` | Set the priority order of all rules | modify |
-| `devdome-redirect-manager/delete-redirect` | Permanently delete a rule; requires `confirm: true` | destroy |
-| `devdome-redirect-manager/reset-redirect-stats` | Reset a rule's statistics and visitor memory; requires `confirm: true` | destroy |
-| `devdome-redirect-manager/purge-redirect-cache` | Purge page caches for one rule or all rules | modify |
+| `devdome-redirect-manager/list-redirects` | All rules in priority order, full configuration, state and statistics | read |
+| `devdome-redirect-manager/get-redirect-details` | One rule, per-source, per-destination, per-country and daily counts | read |
+| `devdome-redirect-manager/get-redirect-stats` | Totals: redirects, bypasses, page views, deduplicated unique visitors, devices; per-rule stats | read |
+| `devdome-redirect-manager/find-404-redirect-candidates` | Visitor 404 paths and suggested targets; requires DevDome Link Monitor | read |
+| `devdome-redirect-manager/search-site-content` | Search pages, posts and categories by title | read |
+| `devdome-redirect-manager/get-geo-status` | Geo service health and proxy/CDN detection | read |
+| `devdome-redirect-manager/export-redirects` | Full configuration JSON, matching Export | read |
+| `devdome-redirect-manager/create-redirect` | All options: sources, methods, destinations, rotation, opening, delays, frequency, schedules, geo, devices, fallback, custom domains; stopped unless `start: true` | add |
+| `devdome-redirect-manager/update-redirect` | All-or-nothing changes; refused keys leave rules untouched | modify |
+| `devdome-redirect-manager/set-redirect-state` | Run/Stop | modify |
+| `devdome-redirect-manager/duplicate-redirect` | Create "<name> copy", stopped, zero statistics | add |
+| `devdome-redirect-manager/reorder-redirects` | Set all rule priorities | modify |
+| `devdome-redirect-manager/delete-redirect` | Permanently delete; requires `confirm: true` | destroy |
+| `devdome-redirect-manager/reset-redirect-stats` | Reset statistics and visitor memory; requires `confirm: true` | destroy |
+| `devdome-redirect-manager/purge-redirect-cache` | Purge page caches for one/all rules | modify |
 
-All fifteen are `public` and `show_in_rest` (`GET /wp-json/wp-abilities/v1/abilities`, authenticated). Read abilities carry
-the `readonly` annotation, add and modify abilities are non-destructive, and the two destroy abilities are annotated
-`destructive` and refuse to run without an explicit `confirm: true`. On the MCP Adapter's default server they appear as
-direct tools (`devdome-redirect-manager-create-redirect` and so on) next to the adapter's discover / execute meta-tools.
+All fifteen are `public` and `show_in_rest`: authenticated `GET /wp-json/wp-abilities/v1/abilities`. Read abilities are annotated `readonly`; add/modify are non-destructive; destroy abilities are `destructive`.
 
-Try it: install the MCP Adapter, create an application password for an administrator, then add the site to Claude Code:
+Enabling geo targeting and disabling enabled Visitor Check or Outdated Browsers settings also require confirmation. The default MCP server exposes direct tools such as `devdome-redirect-manager-create-redirect` alongside discover/execute meta-tools.
+
+Install the adapter, create an administrator application password, and configure Claude Code:
 
 ```json
 {"mcpServers":{"my-site":{"type":"http","url":"https://example.com/wp-json/mcp/mcp-adapter-default-server","headers":{"Authorization":"Basic <base64 user:application-password>"}}}}
 ```
 
-Verified 2026-09-10 with Claude Code as the MCP client: a full-option create request ("302, Black Friday mobile, US and
-CA, weekdays 9 to 17 Berlin, once per visitor, don't start") produced a correct stopped rule unaided, a rename of a rule
-that did not exist was refused instead of guessed, and a subscriber account was denied.
+Verified 2026-09-10 with Claude Code: a full-option request for a stopped Black Friday 302 rule, US/Canadian mobile visitors, weekdays 9 to 17 Berlin time, once per visitor, succeeded unaided. Renaming a nonexistent rule was refused; subscriber access was denied.
 
 ## Screenshots
 
@@ -112,23 +129,22 @@ that did not exist was refused instead of guessed, and a subscriber account was 
 
 ## Requirements
 
-WordPress 6.0+, PHP 7.4+. Geo filtering uses the DevDome geo service.
+WordPress 5.6+, PHP 7.4+. Geo filtering uses the DevDome geo service.
 
 ## Installation
 
-1. In wp-admin go to **Plugins > Add New**, search for **DevDome Redirect Manager**, install and activate.
-2. Open **DevDome > Redirect Manager**, add a rule, choose what to redirect and where, save and run.
+1. In wp-admin, open **Plugins > Add New**, search **DevDome Redirect Manager**, install and activate.
+2. Open **Tools > DevDome Redirect Manager**, add a rule, choose sources and destinations, then **Save & Run**.
 
 ## Part of the DevDome plugin family
 
-Free WordPress plugins by [DevDome](https://devdome.com): Analytics (cookieless, bot and AI crawler split, public
-API and MCP server), Redirect Manager, Media Cleaner, Link Monitor, Affiliate Manager. Every plugin ships with the
-DevDome Dashboard inside wp-admin, so the others install in one click.
+Free WordPress plugins by [DevDome](https://devdome.com): Analytics (cookieless, bot/AI crawler split, public API and MCP server), Redirect Manager, Media Cleaner, Link Monitor and Affiliate Manager.
+
+Every plugin includes the DevDome Dashboard in wp-admin for one-click installation of the others.
 
 ## Development
 
-This repository mirrors the release published on WordPress.org. Bug reports and feature requests: open an issue here
-or use the [support forum](https://wordpress.org/support/plugin/devdome-redirect-manager/).
+This repository mirrors the WordPress.org release. Open an issue for bugs or feature requests, or use the [support forum](https://wordpress.org/support/plugin/devdome-redirect-manager/).
 
 ## License
 
