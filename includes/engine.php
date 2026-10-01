@@ -1453,7 +1453,6 @@ add_action('template_redirect', function(){
             $redirect_id = substr(md5(uniqid('', true)), 0, 16);
         }
 
-        $bfcache_reload_js = "\n            (function(){\n                try {\n                    window.addEventListener('pageshow', function(e){\n                        if (e && e.persisted) {\n                            location.reload();\n                        }\n                    });\n                    var nav = performance && performance.getEntriesByType ? performance.getEntriesByType('navigation')[0] : null;\n                    if (nav && nav.type === 'back_forward') {\n                        location.reload();\n                    }\n                } catch (e) {}\n            })();\n        ";
         
         if ($open_mode === 'new_tab') {
             $delay_min = (float) devdredi_get_setting('new_tab_delay_min', 0);
@@ -1513,14 +1512,13 @@ add_action('template_redirect', function(){
                     $found_patterns[] = array('frag' => $frag, 'nth' => $nth);
                 }
             }
-            $found_patterns_json = wp_json_encode($found_patterns);
             $is_404_js = is_404() ? '1' : '0';
-            add_action('wp_footer', function () use ($found_patterns_json, $delay_js, $after_click_js, $open_mode, $current_full_url, $bfcache_reload_js, $redirect_id, $is_404_js) {
+            add_action('wp_footer', function () use ($found_patterns, $delay_js, $after_click_js, $open_mode, $current_full_url, $redirect_id, $is_404_js) {
                 ?>
-                <?php devdredi_footer_js_capture(function () use ($found_patterns_json, $delay_js, $after_click_js, $open_mode, $current_full_url, $bfcache_reload_js, $redirect_id, $is_404_js) { ?>
-                    <?php echo $bfcache_reload_js; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- static inline JS, no dynamic/user data. ?>
+                <?php devdredi_footer_js_capture(function () use ($found_patterns, $delay_js, $after_click_js, $open_mode, $current_full_url, $redirect_id, $is_404_js) { ?>
+                    <?php devdredi_print_bfcache_reload_js(); ?>
                     (function () {
-                        var patterns = <?php echo $found_patterns_json; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- wp_json_encode() output. ?>;
+                        var patterns = <?php echo wp_json_encode($found_patterns); ?>;
                         var rid = <?php echo wp_json_encode($redirect_id); ?>;
                         var currentUrl = <?php echo wp_json_encode($current_full_url); ?>;
                         function findUrl() {
@@ -1563,7 +1561,7 @@ add_action('template_redirect', function(){
                             setTimeout(function () {
                                 <?php if ($open_mode === 'new_tab'): ?>
                                 document.addEventListener('click', function () {
-                                    var d = <?php echo $after_click_js; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- inline JS numeric expression built from float settings; no user input. ?>;
+                                    var d = <?php echo esc_js($after_click_js); ?>;
                                     // Open the tab synchronously in the gesture (pop-up blockers reject a
                                     // delayed window.open); navigate it once the after-click delay elapses.
                                     if (d > 0) { var w = window.open('about:blank', '_blank'); setTimeout(function () { go(w); }, d); } else { go(); }
@@ -1571,7 +1569,7 @@ add_action('template_redirect', function(){
                                 <?php else: ?>
                                 go();
                                 <?php endif; ?>
-                            }, <?php echo $delay_js; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- inline JS numeric expression built from float settings; no user input. ?>);
+                            }, <?php echo esc_js($delay_js); ?>);
                         }
                         if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', init, { once: true }); } else { init(); }
                     })();
@@ -1598,18 +1596,16 @@ add_action('template_redirect', function(){
         if ($protected && preg_match('/devdredi_v=([a-f0-9]{64})/', $nav, $pm)) {
             $pass_half = str_split($pm[1], 32);
         }
-        $pass_js = 'var ddvU=' . wp_json_encode(home_url('/')) . ',ddvA=' . wp_json_encode($pass_half[0]) . ',ddvB=' . wp_json_encode($pass_half[1]) . ';'
-            . "function ddvGo(){return ddvU+(ddvU.indexOf('?')===-1?'?':'&')+'devdredi_'+'v='+ddvA+ddvB+'&r='+encodeURIComponent(document.referrer||'');}";
 
         if ($open_mode === 'same_tab') {
             // Same-tab: optionally wait for a visitor click before navigating (instead of auto-redirect).
             $same_tab_require_click = (int) devdredi_get_setting('same_tab_require_click', 0);
-            add_action('wp_footer', function() use ($target, $nav, $protected, $pass_js, $delay, $delay_js, $after_click_js, $same_tab_require_click, $current_full_url, $bfcache_reload_js, $zero_delay_config, $redirect_id) {
+            add_action('wp_footer', function() use ($target, $nav, $protected, $pass_half, $delay, $delay_js, $after_click_js, $same_tab_require_click, $current_full_url, $zero_delay_config, $redirect_id) {
                 ?>
                 <a id="go" href="<?php echo $protected ? '#' : esc_url($nav); ?>" style="display:none;"></a>
-                <?php devdredi_footer_js_capture(function () use ($target, $protected, $pass_js, $delay_js, $after_click_js, $same_tab_require_click, $current_full_url, $bfcache_reload_js, $zero_delay_config, $redirect_id) { ?>
-                    <?php if ($protected) { echo $pass_js; } // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built above from wp_json_encode() values and static JS. ?>
-                    <?php echo $bfcache_reload_js; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- static inline JS, no dynamic/user data. ?>
+                <?php devdredi_footer_js_capture(function () use ($target, $protected, $pass_half, $delay_js, $after_click_js, $same_tab_require_click, $current_full_url, $zero_delay_config, $redirect_id) { ?>
+                    <?php if ($protected) { devdredi_print_pass_js($pass_half); } ?>
+                    <?php devdredi_print_bfcache_reload_js(); ?>
                     (function () {
                     function devdrediSameTabInit() {
                         var rid = <?php echo wp_json_encode($redirect_id); ?>;
@@ -1661,7 +1657,7 @@ add_action('template_redirect', function(){
                         setTimeout(function() {
                             <?php if ($same_tab_require_click): ?>
                             document.addEventListener('click', function() {
-                                var acDelay = <?php echo $after_click_js; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- inline JS numeric expression built from float settings; no user input. ?>;
+                                var acDelay = <?php echo esc_js($after_click_js); ?>;
                                 if (acDelay > 0) {
                                     setTimeout(doSameTabNav, acDelay);
                                 } else {
@@ -1671,7 +1667,7 @@ add_action('template_redirect', function(){
                             <?php else: ?>
                             doSameTabNav();
                             <?php endif; ?>
-                        }, <?php echo $delay_js; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- inline JS numeric expression built from float settings; no user input. ?>);
+                        }, <?php echo esc_js($delay_js); ?>);
                     }
                     // A script optimizer can run this after DOMContentLoaded already fired: then start right away.
                     if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', devdrediSameTabInit, { once: true }); } else { devdrediSameTabInit(); }
@@ -1679,12 +1675,12 @@ add_action('template_redirect', function(){
                 <?php });
             });
         } else {
-            add_action('wp_footer', function() use ($target, $nav, $protected, $pass_js, $delay, $delay_js, $after_click_js, $current_full_url, $bfcache_reload_js, $zero_delay_config) {
+            add_action('wp_footer', function() use ($target, $nav, $protected, $pass_half, $delay, $delay_js, $after_click_js, $current_full_url, $zero_delay_config) {
                 ?>
                 <a id="go" style="display:none;" target="_blank"></a>
-                <?php devdredi_footer_js_capture(function () use ($target, $nav, $protected, $pass_js, $delay_js, $after_click_js, $current_full_url, $bfcache_reload_js, $zero_delay_config) { ?>
-                    <?php if ($protected) { echo $pass_js; } // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built above from wp_json_encode() values and static JS. ?>
-                    <?php echo $bfcache_reload_js; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- static inline JS, no dynamic/user data. ?>
+                <?php devdredi_footer_js_capture(function () use ($target, $nav, $protected, $pass_half, $delay_js, $after_click_js, $current_full_url, $zero_delay_config) { ?>
+                    <?php if ($protected) { devdredi_print_pass_js($pass_half); } ?>
+                    <?php devdredi_print_bfcache_reload_js(); ?>
                     (function() {
                         function initClickCapture() {
                             <?php if ($zero_delay_config): ?>
@@ -1708,7 +1704,7 @@ add_action('template_redirect', function(){
                             
                             var targetUrl = <?php if ($protected): ?>ddvGo()<?php else: ?><?php echo wp_json_encode($nav); ?><?php endif; ?>;
                             var currentUrl = <?php echo wp_json_encode($current_full_url); ?>;
-                            var afterDelay = <?php echo $after_click_js; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- inline JS numeric expression built from float settings; no user input. ?>;
+                            var afterDelay = <?php echo esc_js($after_click_js); ?>;
 
                             function handleFirstClick(e) {
                                 <?php if (!$protected): ?>
@@ -1749,7 +1745,7 @@ add_action('template_redirect', function(){
 
                             setTimeout(function() {
                                 document.addEventListener('click', handleFirstClick, { once: true, capture: true });
-                            }, <?php echo $delay_js; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- inline JS numeric expression built from float settings; no user input. ?>);
+                            }, <?php echo esc_js($delay_js); ?>);
                         }
 
                         if (document.readyState === 'loading') {
@@ -1930,3 +1926,35 @@ JS;
     wp_add_inline_script('devdredi-referrer-bootstrap', $js);
 }
 add_action('wp_enqueue_scripts', 'devdredi_print_referrer_bootstrap', 99);
+
+/**
+ * Footer script pieces printed as literals (WordPress.org escaping rule: nothing dynamic is echoed here).
+ * Back/forward cache: a page restored from bfcache (or reached with the Back button) reloads, so the redirect timer
+ * starts fresh instead of firing from a stale document.
+ */
+function devdredi_print_bfcache_reload_js()
+{
+    ?>
+            (function(){
+                try {
+                    window.addEventListener('pageshow', function(e){
+                        if (e && e.persisted) {
+                            location.reload();
+                        }
+                    });
+                    var nav = performance && performance.getEntriesByType ? performance.getEntriesByType('navigation')[0] : null;
+                    if (nav && nav.type === 'back_forward') {
+                        location.reload();
+                    }
+                } catch (e) {}
+            })();
+    <?php
+}
+
+/** The Visitor Check pass: the two halves of the pass token and the site URL, each through wp_json_encode(). */
+function devdredi_print_pass_js($pass_half)
+{
+    echo 'var ddvU=', wp_json_encode(home_url('/')), ',ddvA=', wp_json_encode($pass_half[0]), ',ddvB=', wp_json_encode($pass_half[1]), ';';
+    echo "function ddvGo(){return ddvU+(ddvU.indexOf('?')===-1?'?':'&')+'devdredi_'+'v='+ddvA+ddvB+'&r='+encodeURIComponent(document.referrer||'');}";
+}
+

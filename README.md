@@ -1,4 +1,4 @@
-# DevDome Redirect Manager: Redirector, Link Rotator & Geo Redirect
+# DevDome Redirect Manager: Link Rotator, Geo Redirect # DevDome Redirect Manager: Redirector, Link Rotator & Geo Redirect 302 Redirect
 
 Redirect manager and URL rotator with 302 redirects, same-path domain forwarding, country targeting via IP lookup and per-rule statistics. Configure independent rules without coding, with unlimited rules and no paid tier.
 

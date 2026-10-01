@@ -1,18 +1,22 @@
-=== DevDome Redirect Manager: Redirector, Link Rotator & Geo Redirect ===
+=== DevDome Redirect Manager: Link Rotator, Geo Redirect & 302 Redirect ===
 Contributors: devdome
-Tags: redirector, url rotator, link rotator, geo redirect, geotargeting
+Tags: url rotator, link rotator, geo redirect, geotargeting, device redirect
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.5.5
+Stable tag: 1.5.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Redirect manager and URL rotator with 302 redirects, same-path domain forwarding, country targeting via IP lookup and per-rule statistics.
+Set up 301 and 302 redirects, URL rotation, geo redirect and device redirect rules, plus domain forwarding and per-rule statistics.
 
 == Description ==
 
-DevDome Redirect Manager handles URL redirect rules for your entire site, selected content, custom paths or 404 pages. Send visitors to a destination URL, a rotating list, a link on the page or the same path on another domain, with separate targeting, schedules and statistics for each rule. Configure everything from one screen without coding; all features are free, with unlimited rules and no paid tier.
+DevDome Redirect Manager handles URL redirect rules for your entire site, selected content, custom paths or 404 pages. Use a 302 redirect for temporary forwarding or a 301 redirect for permanent redirection, with separate schedules and statistics for each rule. Configure everything from one screen without coding; all features are free, with unlimited rules and no paid tier.
+
+Use the link rotator to send visitors through a list of destination URLs in order, randomly or with weighted distribution. The URL rotator can split traffic between destinations for basic split testing. For domain forwarding, send visitors to the same path on another domain while preserving the query string.
+
+Set up a geo redirect with optional geotargeting to redirect by country using IP lookup. Include or exclude listed countries for each country redirect rule. Choose Desktop, Mobile or Tablet for a device redirect, or select Mobile for a mobile redirect. Country filtering is off by default.
 
 = Redirect Setup: choose what to redirect =
 
@@ -255,6 +259,12 @@ Those two build inputs are not included in the distributed package. Ask for them
 5. Scheduling: run a redirect rule between dates and times in your timezone.
 
 == Changelog ==
+
+= 1.5.6 =
+
+* Shared DevDome library 1.7.10: the one-time Report a bug hint is recorded through a nonce-checked request instead of on a page view; the DevDome dashboard lists only real problems and prints its icons through the WordPress escaping functions.
+* The redirect scripts and the rule list are printed through the WordPress escaping functions, with no escaping exceptions left (WordPress.org review rule). The scripts themselves are unchanged.
+* Listing text updated: title, short description, tags and introduction.
 
 = 1.5.5 =
 * New per-rule exclusions under Optional Settings, each with its own checkbox and off by default: IP addresses and CIDR ranges (IPv4 and IPv6), browser strings (User-Agent), and logged-in WordPress user roles.

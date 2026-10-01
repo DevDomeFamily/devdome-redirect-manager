@@ -82,10 +82,17 @@ function devdredi_rule_editable_settings($rid)
     return $out;
 }
 
-/** Render the rule-list rows (shared by the page and the AJAX "add rule" so markup stays in one place). */
+/** The rule-list rows as a string for the AJAX "add rule" answer (the page prints them with devdredi_print_rule_rows()). */
 function devdredi_render_rule_rows($rm_rules, $rm_active, $rm_base, $rm_nonce)
 {
     ob_start();
+    devdredi_print_rule_rows($rm_rules, $rm_active, $rm_base, $rm_nonce);
+    return ob_get_clean();
+}
+
+/** Print the rule-list rows (shared by the page and the AJAX "add rule" so markup stays in one place). */
+function devdredi_print_rule_rows($rm_rules, $rm_active, $rm_base, $rm_nonce)
+{
     foreach ($rm_rules as $i => $r):
         $rid = $r['id'];
         $is_active = ($rid === $rm_active);
@@ -154,7 +161,6 @@ function devdredi_render_rule_rows($rm_rules, $rm_active, $rm_base, $rm_nonce)
                         </div>
     <?php
     endforeach;
-    return ob_get_clean();
 }
 
 // Create a rule and return the re-rendered rule list + the new rule's settings, so the admin can
@@ -1393,7 +1399,7 @@ function devdredi_settings_page()
                     <input type="hidden" name="rm_editing_rule" id="dd-editing-rule" value="<?php echo esc_attr($rm_active); ?>">
                     <input type="hidden" name="rule_order" id="dd-rule-order" value="">
                     <div class="dd-rule-list" id="dd-rule-list">
-                        <?php echo devdredi_render_rule_rows($rm_rules, $rm_active, $rm_base, $rm_nonce); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- rows are built and escaped inside devdredi_render_rule_rows(). ?>
+                        <?php devdredi_print_rule_rows($rm_rules, $rm_active, $rm_base, $rm_nonce); ?>
                     </div>
                     <a class="dd-rule-add" id="dd-rule-add" href="<?php echo esc_url($rm_base . '&rm_rule_action=add&_rmn=' . $rm_nonce); ?>"><span class="dashicons dashicons-plus-alt2" style="font-size:16px;width:16px;height:16px;line-height:16px;"></span> Add Rule</a>
                 </div>
