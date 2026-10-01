@@ -1,6 +1,6 @@
-# DevDome Redirect Manager: Link Rotator, Geo Redirect # DevDome Redirect Manager: Redirector, Link Rotator & Geo Redirect 302 Redirect
+# DevDome Redirect Manager: Link Rotator, Geo Redirect & 302 Redirect
 
-Redirect manager and URL rotator with 302 redirects, same-path domain forwarding, country targeting via IP lookup and per-rule statistics. Configure independent rules without coding, with unlimited rules and no paid tier.
+Set up 301 and 302 redirects, URL rotation, geo redirect and device redirect rules, plus domain forwarding and per-rule statistics. Configure rules for your entire site, selected content, custom paths or 404 pages from one screen without coding. Rotate destinations in order, randomly or with weighted distribution, or forward visitors to the same path on another domain while preserving the query string. All features are free, with unlimited rules and no paid tier.
 
 [![WordPress Plugin Version](https://img.shields.io/wordpress/plugin/v/devdome-redirect-manager?label=wp.org)](https://wordpress.org/plugins/devdome-redirect-manager/)
 [![Active Installs](https://img.shields.io/wordpress/plugin/installs/devdome-redirect-manager)](https://wordpress.org/plugins/devdome-redirect-manager/)
