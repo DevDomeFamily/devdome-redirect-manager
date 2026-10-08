@@ -4,7 +4,7 @@ Tags: url rotator, link rotator, geo redirect, geotargeting, device redirect
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.5.6
+Stable tag: 1.5.7
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -30,17 +30,17 @@ Under **What To Redirect**, choose:
 * **All 404's** - runs on every not-found page to catch dead links. For a 404 to homepage rule, set your homepage as the destination.
 * **Referring websites** - match listed websites against the browser's referrer. A domain such as reddit.com covers that site and its subdomains; a word such as reddit matches referring addresses containing it. Without UTM source matching, visits with no referrer or an internal referrer do not match. "Only on selected pages" restricts the rule to chosen categories, pages or posts.
 
-For a homepage redirect, target the homepage through Selected existing URLs. To make short links, manually choose a custom path and its destination: a short URL or vanity URL uses a path you supply, without generated slugs.
+For a homepage redirect, target the homepage through Selected existing URLs. For short links, choose a custom path and its destination: a short URL or vanity URL uses a path you supply, without generated slugs.
 
 = Referring websites and UTM Source =
 
-"Only visitors arriving from outside" redirects external arrivals, including visits with no referrer, while leaving visitors moving between your own pages on the page.
+"Only visitors arriving from outside" redirects external arrivals, including visits with no referrer, and leaves visitors moving between your own pages alone.
 
-**UTM Source** - "Also match the link's UTM source" lets a Referring websites rule match tagged links from apps and other sources without a referrer. For a listed source of reddit.com, both `?utm_source=reddit.com` and `?utm_source=reddit` match. Anyone can set this label; it does not verify where a visitor came from.
+**UTM Source** - "Also match the link's UTM source" lets a Referring websites rule match tagged links from apps and sources without a referrer: for reddit.com, both `?utm_source=reddit.com` and `?utm_source=reddit` match. Anyone can set this label; it does not verify origin.
 
 = Redirect Method and URL forwarding =
 
-Choose **JavaScript Redirect**, **301 Permanent**, **302 Temporary**, **307 Temporary**, **308 Permanent** or **Meta Refresh** per rule. Use a 301 redirect for permanent redirection or a 302 redirect for temporary URL forwarding. New-tab opening and client-side delays require JavaScript; server and meta methods always open in the same tab.
+Choose **JavaScript Redirect**, **301 Permanent**, **302 Temporary**, **307 Temporary**, **308 Permanent** or **Meta Refresh** per rule: a 301 redirect for permanent redirection, a 302 redirect for temporary URL forwarding. New-tab opening and client-side delays need JavaScript; server and meta methods open in the same tab.
 
 Under **Where To Send Traffic**, choose:
 
@@ -50,48 +50,43 @@ Under **Where To Send Traffic**, choose:
 
 = Link rotation and traffic distribution =
 
-The URL rotator supports **First to last**, **Random** and **Weighted distribution** for provided links. The **Click Distribution** slider gives the first link most traffic, an even split or the last link most traffic, with a live preview. **Repeat List** restarts from the first URL when the list is exhausted.
+The URL rotator supports **First to last**, **Random** and **Weighted distribution** for provided links. The **Click Distribution** slider favours the first link, splits evenly or favours the last, with a live preview; **Repeat List** restarts from the first URL.
 
-For basic AB testing or split testing of destinations, the rotator can split traffic between links. It does not measure conversions or determine a winning destination.
+For basic AB testing or split testing, the rotator splits traffic between links; it does not measure conversions or pick a winner.
 
 = How often to redirect =
 
-Choose **Every visit**, **Once per visitor** or **After a delay**. For the latter two, recognise returning visitors by IP address or IP + browser/device, and optionally redirect only every N-th unique visitor. After a delay lets you set the gap in minutes, hours or days before redirecting the same visitor again.
+Choose **Every visit**, **Once per visitor** or **After a delay**. The latter two recognise returning visitors by IP address or IP + browser/device and can redirect only every N-th unique visitor; After a delay sets the gap in minutes, hours or days.
 
-**Daily Redirect Limit** - "Limit redirects per day" sets a per-rule cap. Enter two positive whole numbers; the daily cap is chosen randomly between them. Use the same number twice for a fixed cap.
-
-A redirect counts when the rule makes it, not when someone reaches the destination. With Visitor Check enabled, it counts when the pass is accepted, so merely loading a page costs nothing.
+**Daily Redirect Limit** - "Limit redirects per day" sets a per-rule cap chosen each day between two whole numbers; the same number twice is a fixed cap. A redirect counts when the rule makes it, not on arrival; with Visitor Check it counts when the pass is accepted, so loading a page costs nothing.
 
 = Known Bots, Outdated Browsers and Visitor Check =
 
-**Known Bots** - "Don't redirect known bots" is on by default. Matching requests are not redirected, sent to the bypass link or counted as visitors. Local checks use built-in browser identifiers and any shared DevDome bot data already stored locally. This build downloads no bot feeds. Unrecognised bots can still be redirected.
+**Known Bots** - "Don't redirect known bots" is on by default. Matching requests are not redirected, sent to the bypass link or counted as visitors. Local checks use built-in browser identifiers and any shared DevDome bot data already stored locally; this build downloads no bot feeds. Unrecognised bots can still be redirected.
 
-**Outdated Browsers** - "Don't redirect outdated browsers" skips reported Chrome/Chromium versions below 125, except 109, and Firefox versions below 125, except 115. Edge is checked through its Chrome version identifier. Browser identifiers containing Mobile, Android, iPhone or iPad are excluded from this check. Older versions can belong to real visitors.
+**Outdated Browsers** - "Don't redirect outdated browsers" skips reported Chrome/Chromium versions below 125, except 109, and Firefox below 125, except 115. Edge is checked through its Chrome version. Browser identifiers containing Mobile, Android, iPhone or iPad are not checked. Older versions can belong to real visitors.
 
-**Visitor Check** - "Require the same IP address to continue" checks that a single-use pass returns from the same IP address and browser. It applies only to JavaScript redirects to provided links or the same path on another domain, not links found on the page.
+**Visitor Check** - "Require the same IP address to continue" checks that a single-use pass returns from the same IP address and browser. It applies only to JavaScript redirects to provided links or the same path on another domain, not links found on the page; off by default. The pass stays in your database as a keyed hash of IP address and browser, never the raw values, is deleted when used and expires within minutes plus any configured delay.
 
-The pass record stays in your database with a keyed hash of the visitor's IP address and browser, never those raw values. It is deleted when used and expires within minutes, with extra time for configured delays.
-
-Visitor Check, Outdated Browsers, Daily Redirect Limit and UTM source matching are off by default. All four run locally without an external service, as do the dashboard count and developer hooks.
 
 = Open Link Settings: automatic redirect or click =
 
-Choose an automatic redirect or wait for a visitor's click. For an auto redirect with a delay, use the JavaScript method and configure the timing below.
+Choose an automatic redirect or wait for a visitor's click. For an auto redirect with a delay, use the JavaScript method.
 
 * **Open Link In** - Same Tab or New Tab. New Tab requires JavaScript.
 * **Same Tab Link Delay** - instant or a random delay in seconds within a range.
 * **Redirect On Click** - wait for a click/tap anywhere before redirecting.
 * **After Click Delay** - wait a random time up to 4 seconds after the click.
-* **New Tab Link Delay** - instant or a random delay before the new tab is armed. The destination opens on the visitor's next real click after that delay because browsers block tabs that open by themselves.
+* **New Tab Link Delay** - instant or a random delay before the new tab is armed; it opens on the visitor's next real click, because browsers block tabs that open by themselves.
 
 = Geo Filter Settings: country redirect and geolocation =
 
-Use geotargeting for a country redirect based on IP geolocation. This GeoIP lookup supplies a country code for geo targeting; a geo IP redirect can include or exclude listed countries.
+Use geotargeting for a country redirect based on IP geolocation. The GeoIP lookup supplies a country code; a geo IP redirect can include or exclude listed countries.
 
-* **Test geo service** - check that the service is reachable from your server before relying on it.
+* **Test geo service** - check that the service is reachable from your server.
 * **Geo Filtering** - enable or disable the country filter; off by default.
-* **Filter mode** - redirect only listed countries or everyone except them. If the country cannot be resolved, an "except listed" blacklist rule does not redirect that visitor.
-* **Site Behind Proxy / CDN** - behind Cloudflare or another proxy, enable "Trust forwarded IP headers" to use the real visitor IP for country lookup. "Detect automatically" inspects the current request and ticks the box for you.
+* **Filter mode** - redirect only listed countries or everyone except them. An unresolved country is not redirected by an "except listed" rule.
+* **Site Behind Proxy / CDN** - behind Cloudflare or another proxy, enable "Trust forwarded IP headers" to use the real visitor IP. The forwarded header counts only when the connection comes from a Cloudflare or private proxy address. "Detect automatically" ticks the box for you.
 
 See External services for what a geo redirect sends and where.
 
@@ -104,34 +99,38 @@ See External services for what a geo redirect sends and where.
 
 = Optional Settings: visitor exclusions =
 
-Exclude your own address, selected browsers or logged-in roles such as Administrator.
+Exclude your own address, selected browsers or logged-in roles such as Administrator. Per rule, off by default; matching visitors see the page as usual and count as skipped bots.
 
-* **Excluded IP Addresses** - one IPv4 or IPv6 address or CIDR range per line. This cannot stop bots that change address on every visit.
-* **Excluded Browser Strings** - skip User-Agent strings containing listed text, ignoring upper and lower case. Entries under 5 characters are not saved.
-* **Excluded User Roles** - skip logged-in users with a ticked role. A page cache may still serve a stored redirect.
+* **Excluded IP Addresses** - one IPv4 or IPv6 address or CIDR range per line.
+* **Excluded Browser Strings** - skip User-Agent strings containing listed text, ignoring case. Entries under 5 characters are not saved.
+* **Excluded User Roles** - skip logged-in users with a ticked role.
 
-All three exclusions are per rule and off by default. Matching visitors see the page as usual and are counted with skipped bots.
+= Optional Settings: hide from search and DevDome Analytics =
+
+* **Noindex Header** - every address the running rule targets answers X-Robots-Tag: noindex, nofollow, to crawlers and visitors alike, before anyone is redirected.
+* **Robots.txt Disallow** - lists the rule's Custom URLs or Selected existing URLs in the virtual robots.txt. Stops crawling, not indexing; no file is written.
+* **Report To DevDome Analytics** - reports each redirect to your DevDome Analytics dashboard; see External services.
+
+Per rule, off by default.
 
 = Rules, run state and link tracking =
 
-Add, duplicate, delete, start and stop rules independently. Each has a nickname and priority; drag rules to reorder redirections.
+Add, duplicate, delete, start and stop rules independently; each has a nickname and priority, and you drag rules to reorder them.
 
 * **Save & Run** starts a rule; **Stop** stops it. Live status shows Running/Stopped, run time and time left.
-* **Save Settings** saves without changing run state. **Return to Default** resets the current rule's settings.
-* **Reset Stats** clears the current rule's statistics and rotation position, but not today's daily-limit count.
-* **Export** downloads every rule and its configuration as JSON, without statistics or run state. **Import** replaces every rule on the site; imported rules arrive stopped.
+* **Save Settings** saves without changing run state. **Return to Default** resets the current rule.
+* **Reset Stats** clears the current rule's statistics and rotation position, not today's daily-limit count.
+* **Export** downloads every rule as JSON, without statistics or run state. **Import** replaces every rule on the site; imported rules arrive stopped.
 
-Each rule records visitors, page views, unique users, unique IPs, redirects, bypassed visitors, device and country counts, and source/destination breakdowns, with a time-range filter. As a link tracker, it provides link tracking for rule activity, not confirmation that visitors reached a destination.
+Each rule records visitors, page views, unique users, unique IPs, redirects, bypassed visitors, device and country counts and source/destination breakdowns, with a time-range filter; this link tracking covers rule activity, not arrival at a destination.
 
-**Bots Skipped** includes bot matches, outdated-browser matches, IP address, browser string and user role exclusions, and expired or mismatched Visitor Check passes. The DevDome dashboard totals these across rules. It is not a count of confirmed bots.
+**Bots Skipped** counts bot and outdated-browser matches, the three exclusions and refused Visitor Check passes, totalled across rules on the DevDome dashboard. It is not a count of confirmed bots.
 
 = Developer hooks =
 
 * `devdredi_redirect_target` filters destinations for provided links and same-path redirects.
-* `devdredi_pass_bind_address` filters the address a Visitor Check pass is bound to, for example a network range instead of an exact address.
-* `devdredi_redirected` responds to redirect events.
-
-These hooks do not confirm arrival at the destination.
+* `devdredi_pass_bind_address` filters the address a Visitor Check pass is bound to, for example a network range.
+* `devdredi_redirected` fires on redirect events. Neither confirms arrival at the destination.
 
 == Installation ==
 
@@ -184,7 +183,7 @@ Further visitors handled by that rule stay on the page or go to its bypass link.
 
 Country lookups send visitor IP addresses to the geo service when Geo Filtering is enabled. "Test geo service" also contacts that service. The plugin catalog and optional account connection have separate external requests. See External services for details.
 
-Visitor Check, Outdated Browsers, Daily Redirect Limit and UTM source matching run locally without an external service.
+Visitor Check, Outdated Browsers, Daily Redirect Limit, UTM source matching and Hide From Search run locally. Report To DevDome Analytics sends data only when ticked on a rule.
 
 = How do I stop being redirected on my own site? =
 
@@ -208,37 +207,37 @@ After you change URL paths or change permalink settings in WordPress, enter the 
 
 On WordPress 6.9+, compatible AI agents and MCP clients can use WordPress Abilities when your site exposes them, for example through the WordPress MCP Adapter. Abilities cover rule configuration, statistics, content search, 404 suggestions with DevDome Link Monitor, geo status, export and rule management. Administrator access is required.
 
-New fields are `skip_ips`, `skip_user_agents`, `skip_roles`, `visitor_check`, `skip_old_browsers`, `daily_limit_enabled`, `daily_limit_min`, `daily_limit_max` and `referrer_utm_scan`. A list entry that is not valid is refused and nothing is changed; a list with entries switches its exclusion on, an empty list switches it off. Statistics include `bots_skipped`. Agents must obtain user agreement and send `confirm: true` when turning an enabled Visitor Check or Outdated Browsers setting off. Turning Known Bots off does not currently require that flag.
+New fields are `skip_ips`, `skip_user_agents`, `skip_roles`, `visitor_check`, `skip_old_browsers`, `daily_limit_enabled`, `daily_limit_min`, `daily_limit_max`, `referrer_utm_scan`, `search_noindex`, `search_disallow` and `analytics_report` (needs confirmation). A list entry that is not valid is refused and nothing is changed; a list with entries switches its exclusion on, an empty list switches it off. Statistics include `bots_skipped`. Agents must obtain user agreement and send `confirm: true` when turning an enabled Visitor Check or Outdated Browsers setting off. Turning Known Bots off does not currently require that flag.
 
 New rules start stopped unless requested otherwise. Updates are all or nothing. Enabling geo targeting, deleting rules and resetting statistics also require confirmation.
 
 == External services ==
 
-**Plugin catalog (`devdome.com`).** The DevDome Dashboard inside wp-admin fetches the list of DevDome plugins (names, descriptions, logos, links, WordPress.org slugs) from `https://devdome.com/wp-plugins/catalog.json` at most once every 12 hours, so the list stays current. Only the bundled core version is sent in the request; no site or visitor data. Service provider: DevDome. Terms: https://devdome.com/terms-of-service Privacy policy: https://devdome.com/privacy-policy
+**Plugin catalog (`devdome.com`).** The DevDome Dashboard in wp-admin fetches the list of DevDome plugins (names, descriptions, logos, links, WordPress.org slugs) from `https://devdome.com/wp-plugins/catalog.json` at most once every 12 hours. Only the bundled core version is sent; no site or visitor data.
 
-This plugin can talk to two DevDome services, both optional and described below. Service provider for both: DevDome. Terms of service: https://devdome.com/terms-of-service . Privacy policy: https://devdome.com/privacy-policy .
+The plugin can also talk to the DevDome services below, all optional. Service provider for every service here: DevDome. Terms of service: https://devdome.com/terms-of-service . Privacy policy: https://devdome.com/privacy-policy .
 
 = Geo lookup (api.devdome.com/geo-resolve) =
 
-The plugin connects to the DevDome geo-resolution service only when you use the optional **Geo Filter** feature. With Geo Filtering turned off (the default), the plugin does not contact this service.
+Used only by the optional **Geo Filter** (off by default) to turn a visitor's IP address into a country code.
 
-What it is used for: turning a visitor's IP address into a two-letter country code so a rule can include or exclude countries.
-
-What is sent and when:
-
-* When a rule with Geo Filtering enabled handles a front-end request, the visitor's IP address is sent to `https://api.devdome.com/geo-resolve/classify` (POST, body `{"ips":[<ip>]}`) to look up a country code. Results are cached so the same IP is not looked up repeatedly.
-* The **Test geo service** button requests `https://api.devdome.com/geo-resolve/health` to check availability. No visitor data is sent.
-* The **Detect automatically** (proxy/CDN) button runs locally on your server and sends no data to any external service.
+* When a rule with Geo Filtering enabled handles a front-end request, the visitor's IP address is sent to `https://api.devdome.com/geo-resolve/classify` (POST, body `{"ips":[<ip>]}`). Results are cached.
+* **Test geo service** requests `https://api.devdome.com/geo-resolve/health`; no visitor data is sent. **Detect automatically** runs locally and sends nothing.
 
 = Bot detection feeds (api.devdome.com/bot-protection) =
 
-The plugin bundles the shared DevDome bot-detection library, which can download three block lists so known bots can be matched locally on your server: `https://api.devdome.com/bot-protection/list` (bot user-agent patterns), `https://api.devdome.com/bot-protection/asns` (data-center network list) and `https://api.devdome.com/bot-protection/drop` (Spamhaus DROP IP ranges).
-
-These requests would be scheduled downloads of the lists themselves; no visitor data is ever sent to these endpoints. On this WordPress.org build the feed downloads are disabled entirely: no request is made and no download is scheduled, whether or not a DevDome account is connected.
+The bundled DevDome bot-detection library can download three block lists for local matching: `https://api.devdome.com/bot-protection/list` (bot user-agent patterns), `.../asns` (data-center networks) and `.../drop` (Spamhaus DROP ranges). No visitor data is sent. On this WordPress.org build the downloads are disabled entirely: no request is made or scheduled, connected or not.
 
 = Optional DevDome account connection (devdome.com and api.devdome.com) =
 
-The bundled DevDome library can link this site to a free DevDome account. This is optional and nothing is sent until you press the Connect button on the DevDome screen. Connecting opens `devdome.com` in your browser to sign in; after approval the plugin stores your public DevDome Account ID and a site token, and verifies the link against `https://api.devdome.com/plugin/account` (sending the site domain and the site token). When you connect from the DevDome Tools dashboard, whose Connect card states this before you press the button, those account checks also send the slug and version of each active DevDome plugin plus the DevDome library, WordPress and PHP versions, so your account can show which of your sites run which DevDome plugins. Sites connected earlier, or from a button without that text, do not send the list. Disconnecting sends the site domain and site token once to `https://api.devdome.com/plugin/disconnect` to unlink the site. Disconnecting also stops the plugin list. No visitor data, content or redirect rules are sent.
+Optional: nothing is sent until you press Connect on the DevDome screen. Connecting opens `devdome.com` to sign in; the plugin then stores your public DevDome Account ID and a site token and verifies the link against `https://api.devdome.com/plugin/account` (site domain and site token). When you connect from the DevDome Tools dashboard, whose Connect card says so first, those checks also send the slug and version of each active DevDome plugin plus the library, WordPress and PHP versions, so your account can show which sites run which plugins; sites connected earlier or from a button without that text send no list. Disconnecting sends the site domain and token once to `https://api.devdome.com/plugin/disconnect` and stops the list. The connection itself sends no visitor data, content or redirect rules; visitor data leaves the site only through the click reports below, for a rule where you tick Report To DevDome Analytics.
+
+= DevDome Analytics click reports (analytics.devdome.com) =
+
+Off by default, per rule: nothing is sent until you tick **Report To DevDome Analytics** on a rule, and nothing while the account is not connected. Clearing the box or disconnecting stops it at once; a report queued in the same request is dropped if consent is gone by then.
+
+* **Redirect events.** Each redirect the rule makes is POSTed by your server as one `redirect` event to `https://analytics.devdome.com/api/event` (JSON): site id (domain), DevDome Account ID, source page URL and path, destination URL, referrer (or the previous DevDome site in a chain), visitor IP address and browser string with the browser, operating system and device type derived from it, country when behind Cloudflare, an inbound ?d= token from another of your sites, a product code when the path carries one, the DevDome Analytics visitor and session ids when its tracker set them, and your site token. The IP address follows the plugin's proxy rules.
+* **Hop token.** `https://analytics.devdome.com/api/plugin/hop-config` (GET, site id and site token) answers an opaque token for this site and the other sites of your account, cached six hours (ten minutes after a failure). A redirect to one of those sites gets `?d=<token>` so it credits this site without naming it. Dropped on disconnect, when the box is cleared, on Return to Default and on deactivation.
 
 == Source code ==
 
@@ -259,6 +258,18 @@ Those two build inputs are not included in the distributed package. Ask for them
 5. Scheduling: run a redirect rule between dates and times in your timezone.
 
 == Changelog ==
+
+= 1.5.7 =
+
+* Visitor statistics and the once-per-visitor redirect count now identify a visitor by the trusted client address (behind Cloudflare or a trusted proxy) instead of the raw connection address, and the agent rule details mask secret values in the selected referrer pages like they do for sources and destinations.
+* New per-rule Hide From Search controls under Optional Settings, both off by default: a Noindex Header sent on every address the rule targets before the plugin decides who is redirected, and a Robots.txt Disallow block for the rule's Custom URLs or Selected existing URLs in the virtual robots.txt. Also available to AI agents as `search_noindex` and `search_disallow`.
+* New per-rule Report To DevDome Analytics switch, off by default: each redirect is reported to your DevDome Analytics dashboard and a destination that is another site of your account gets an opaque ?d= token. Needs a connected DevDome account; what is sent is listed under External services. Agents: `analytics_report`, confirmation required to turn it on.
+* Trust forwarded IP headers now believes a forwarded header only when the connection comes from a Cloudflare address or a private or loopback reverse proxy; a direct visitor can no longer hand the plugin another address.
+* Saving a rule is all or nothing: every row is copied before the first write and put back when a write fails, so visitors never meet a half-changed running rule. Return to Default acts only on the rule the screen shows.
+* A database query that fails during an action (saving, importing, rule actions, agent abilities) now ends in an error instead of a success message, and no further write follows it. Reset Stats reports a rotation position it could not clear.
+* Import checks every value against the same choices and ranges the settings screen enforces and refuses the file otherwise. Agent exports mask credentials and secret-looking values in destination URLs and email addresses; the wp-admin Export file is unchanged. The cache purge ability reports how many caching plugins received the purge.
+* Shared DevDome library 1.7.11: on a subdirectory multisite, a site mapped to its own domain is its own site and no longer shares the network's connection.
+* Shared DevDome library 1.7.12: a Cloudflare visitor address header is trusted only when the connection itself comes from a Cloudflare address, so a forged header from anywhere else is ignored.
 
 = 1.5.6 =
 

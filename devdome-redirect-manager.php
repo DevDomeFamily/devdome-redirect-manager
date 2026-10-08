@@ -3,7 +3,7 @@
 Plugin Name: DevDome Redirect Manager
 Plugin URI: https://devdome.com/wp-plugins/redirect-manager/
 Description: Manage redirects and rotate outgoing links with geo, device and schedule targeting. Part of the DevDome suite.
-Version: 1.5.6
+Version: 1.5.7
 Author: DevDome
 Author URI: https://devdome.com
 Requires at least: 5.6
@@ -23,7 +23,7 @@ if (file_exists(__DIR__ . '/wporg-build.php')) {
     require __DIR__ . '/wporg-build.php';
 }
 
-define('DEVDREDI_VERSION', '1.5.6');
+define('DEVDREDI_VERSION', '1.5.7');
 define('DEVDREDI_DIR', plugin_dir_path(__FILE__));
 define('DEVDREDI_URL', plugin_dir_url(__FILE__));
 
@@ -42,8 +42,11 @@ if (file_exists(DEVDREDI_DIR . 'includes/migrate.php')) {
     require_once DEVDREDI_DIR . 'includes/migrate.php';
 }
 
+require_once DEVDREDI_DIR . 'includes/db-guard.php';
+add_filter('query', 'devdredi_db_guard_record', 1); // DESIGN.md 24: every failed query is recorded before wpdb clears it
 require_once DEVDREDI_DIR . 'includes/settings.php';
 require_once DEVDREDI_DIR . 'includes/helpers.php';
+require_once DEVDREDI_DIR . 'includes/proxy.php';
 require_once DEVDREDI_DIR . 'includes/bots.php';
 require_once DEVDREDI_DIR . 'includes/never-redirect.php';
 require_once DEVDREDI_DIR . 'includes/visitor-check.php';
@@ -52,6 +55,8 @@ require_once DEVDREDI_DIR . 'includes/geo.php';
 require_once DEVDREDI_DIR . 'includes/search.php';
 require_once DEVDREDI_DIR . 'includes/stats.php';
 require_once DEVDREDI_DIR . 'includes/engine.php';
+require_once DEVDREDI_DIR . 'includes/search-visibility.php';
+require_once DEVDREDI_DIR . 'includes/analytics-report.php';
 require_once DEVDREDI_DIR . 'includes/install.php';
 require_once DEVDREDI_DIR . 'includes/abilities.php';
 

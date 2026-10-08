@@ -76,6 +76,13 @@ function devdredi_raw_update_setting($name, $value)
     global $wpdb;
     $table_name = $wpdb->prefix . 'devdredi_settings';
 
+    // DESIGN.md 24: inside an action window (AJAX, ability, settings page) no write follows a failed query. The
+    // boundary reports the database error; an undo step rebases the guard first (its failure is the one being undone).
+    if (function_exists('devdredi_db_guard_active') && devdredi_db_guard_active()) {
+        $GLOBALS['devdredi_write_failed'] = true;
+        return false;
+    }
+
     $stored = is_array($value) ? serialize($value) : $value;
     // INSERT ... ON DUPLICATE KEY UPDATE rather than $wpdb->replace(): REPLACE is a DELETE+INSERT
     // that can deadlock under the concurrent writes the front-end counters generate (and it churns
@@ -308,18 +315,22 @@ function devdredi_purge_plugin_cache()
 function devdredi_purge_page_caches($urls = null)
 {
     if (is_array($urls) && !count($urls)) {
-        return; // empty list = nothing to purge; only null means "purge everything"
+        return 0; // empty list = nothing to purge; only null means "purge everything"
     }
     $all = ($urls === null);
+    $n = 0; // caching plugins that received the purge (1.5.7): the caller can tell "purged" from "no cache plugin here"
 
     // WP Rocket
     if ($all) {
-        if (function_exists('rocket_clean_domain')) { rocket_clean_domain(); }
+        if (function_exists('rocket_clean_domain')) { rocket_clean_domain(); $n++; }
     } elseif (function_exists('rocket_clean_files')) {
-        rocket_clean_files($urls);
+        rocket_clean_files($urls); $n++;
     }
 
     // LiteSpeed Cache
+    if (defined('LSCWP_V') || class_exists('LiteSpeed\Core')) {
+        $n++;
+    }
     if ($all) {
         do_action('litespeed_purge_all'); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- third-party LiteSpeed Cache hook.
     } else {
@@ -328,24 +339,26 @@ function devdredi_purge_page_caches($urls = null)
 
     // W3 Total Cache
     if ($all) {
-        if (function_exists('w3tc_flush_all')) { w3tc_flush_all(); }
+        if (function_exists('w3tc_flush_all')) { w3tc_flush_all(); $n++; }
     } elseif (function_exists('w3tc_flush_url')) {
         foreach ($urls as $u) { w3tc_flush_url($u); }
+        $n++;
     }
 
     // WP Super Cache
     if (!$all && function_exists('wpsc_delete_url_cache')) {
         foreach ($urls as $u) { wpsc_delete_url_cache($u); }
+        $n++;
     } elseif (function_exists('wp_cache_clear_cache')) {
-        wp_cache_clear_cache();
+        wp_cache_clear_cache(); $n++;
     }
 
     // WP Fastest Cache (no public per-URL purge by URL: clear all)
     if (function_exists('wpfc_clear_all_cache')) {
-        wpfc_clear_all_cache();
+        wpfc_clear_all_cache(); $n++;
     } elseif (isset($GLOBALS['wp_fastest_cache']) && is_object($GLOBALS['wp_fastest_cache'])
         && method_exists($GLOBALS['wp_fastest_cache'], 'deleteCache')) {
-        $GLOBALS['wp_fastest_cache']->deleteCache(true);
+        $GLOBALS['wp_fastest_cache']->deleteCache(true); $n++;
     }
 
     // SiteGround Optimizer
@@ -355,15 +368,17 @@ function devdredi_purge_page_caches($urls = null)
         } else {
             foreach ($urls as $u) { sg_cachepress_purge_cache($u); }
         }
+        $n++;
     }
 
     // WP-Optimize
     if (class_exists('WPO_Page_Cache')) {
         if (!$all && method_exists('WPO_Page_Cache', 'delete_cache_by_url')) {
             foreach ($urls as $u) { WPO_Page_Cache::delete_cache_by_url($u, true); }
+            $n++;
         } elseif (function_exists('WP_Optimize') && method_exists(WP_Optimize(), 'get_page_cache')) {
             $wpo_pc = WP_Optimize()->get_page_cache();
-            if ($wpo_pc && method_exists($wpo_pc, 'purge')) { $wpo_pc->purge(); }
+            if ($wpo_pc && method_exists($wpo_pc, 'purge')) { $wpo_pc->purge(); $n++; }
         }
     }
 
@@ -371,16 +386,21 @@ function devdredi_purge_page_caches($urls = null)
     if (class_exists('Cache_Enabler')) {
         if (!$all && method_exists('Cache_Enabler', 'clear_page_cache_by_url')) {
             foreach ($urls as $u) { Cache_Enabler::clear_page_cache_by_url($u); }
+            $n++;
         } elseif (method_exists('Cache_Enabler', 'clear_complete_cache')) {
-            Cache_Enabler::clear_complete_cache();
+            Cache_Enabler::clear_complete_cache(); $n++;
         }
     }
 
     // Hummingbird (page cache; no public per-URL API: clear all)
+    if (has_action('wphb_clear_page_cache')) { $n++; }
     do_action('wphb_clear_page_cache'); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- third-party Hummingbird cache hook.
 
     // Breeze (Cloudways; clear all)
+    if (has_action('breeze_clear_all_cache')) { $n++; }
     do_action('breeze_clear_all_cache'); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- third-party Breeze cache hook.
+
+    return $n;
 }
 
 /**

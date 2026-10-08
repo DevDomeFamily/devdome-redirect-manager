@@ -523,19 +523,12 @@ function devdredi_get_client_ip() {
     $candidates = array();
 
     // Forwarded headers are client-spoofable, so only trust them when the admin has
-    // declared the site sits behind a proxy/CDN. Otherwise geo filtering could be bypassed.
-    if (devdredi_get_bool_setting('trust_proxy', 0)) {
-        if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
-            $candidates[] = sanitize_text_field( wp_unslash( $_SERVER['HTTP_CF_CONNECTING_IP'] ) );
-        }
-        if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-            $parts = explode(',', sanitize_text_field( wp_unslash( $_SERVER['HTTP_X_FORWARDED_FOR'] ) ));
-            foreach ($parts as $part) {
-                $candidates[] = trim($part);
-            }
-        }
-        if (!empty($_SERVER['HTTP_X_REAL_IP'])) {
-            $candidates[] = sanitize_text_field( wp_unslash( $_SERVER['HTTP_X_REAL_IP'] ) );
+    // declared the site sits behind a proxy/CDN AND the connection really comes from one (a Cloudflare edge or a
+    // private / loopback reverse proxy, includes/proxy.php, 1.5.7). A direct visitor's forwarded header is ignored.
+    if (devdredi_get_bool_setting('trust_proxy', 0) && devdredi_remote_is_trusted_proxy()) {
+        $forwarded = devdredi_forwarded_client_ip(); // X-Forwarded-For walked from the proxy side, never the visitor-supplied prefix
+        if ($forwarded !== '') {
+            $candidates[] = $forwarded;
         }
     }
     if (!empty($_SERVER['REMOTE_ADDR'])) {
@@ -1008,6 +1001,9 @@ add_action('template_redirect', function(){
                 $selected_rule = $r['id'];
                 break;
             }
+            // Hide From Search (1.5.7): a running rule targets this address even while out of schedule, so the noindex
+            // header still goes out (Codex r1: otherwise the address is indexable whenever the schedule is closed).
+            devdredi_send_noindex_header();
             // A running rule targets this URL but is out of schedule right now. Unless its
             // schedule is permanently over it WILL resume — a copy cached now would freeze the
             // plain page and break the redirect once it does, so this render must be no-store
@@ -1085,6 +1081,9 @@ add_action('template_redirect', function(){
     // render of a rule-targeted URL no-store so the page is never cached and PHP runs on every
     // hit, keeping the decision live. Static assets are excluded inside the helper.
     devdredi_send_nocache_immunity();
+    // Hide From Search (1.5.7): the noindex header goes out on every request the rule targets, for crawlers and people
+    // alike, BEFORE the schedule, bot and visitor decisions below pick who is redirected.
+    devdredi_send_noindex_header();
 
     if (!devdredi_is_in_schedule()) {
         devdredi_track_visit($current_full_url);

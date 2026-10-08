@@ -102,5 +102,6 @@ function devdredi_deactivate()
     // Deactivation is non-destructive: settings + stats are preserved so the plugin can be
     // toggled off/on safely. Full data removal happens only on delete (see uninstall.php).
     wp_clear_scheduled_hook('devdredi_refresh_bots');
+    delete_transient('devdredi_hop_cfg'); // the cached DevDome Analytics hop token (1.5.7)
     wp_cache_flush();
 }

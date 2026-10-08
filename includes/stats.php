@@ -37,7 +37,12 @@ function devdredi_reset_stats()
     }
     $prefix = $rule_scope . '|';
     foreach (array('devdredi_user_seq_counters', 'devdredi_user_random_queue', 'devdredi_user_random_used') as $opt) {
+        devdredi_db_reset_error();
         $vals = get_option($opt, array());
+        if (devdredi_db_failed()) {
+            $GLOBALS['devdredi_write_failed'] = true; // a failed read is not an empty option: the rotation position may still be there
+            continue;
+        }
         if (!is_array($vals) || empty($vals)) {
             continue;
         }
@@ -161,7 +166,8 @@ function devdredi_track_visit($link_label, $outgoing_url = null, $status_code = 
         }
     }
 
-    $ip  = sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ?? '' ) );
+    // The trusted client address (Cloudflare / proxy aware, same as the redirect engine), not the raw peer (Codex 1.5.7 r4).
+    $ip  = function_exists('devdredi_get_client_ip') ? (string) devdredi_get_client_ip() : sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ?? '' ) );
     // Prefer the shared-suite beacon's session cookie as the visitor identity when present —
     // a far more accurate unique-visitor signal than the raw IP (distinguishes shared-IP
     // visitors, dedupes one person across changing IPs). Falls back to the IP with no beacon.
@@ -221,7 +227,7 @@ function devdredi_count_js_redirect($label, $out, $rid, $ref, $is_slc, $is_404, 
     // Identify the visitor the way track_visit does — the suite beacon's session cookie
     // when present, else REMOTE_ADDR — so the 30s dedupe doesn't fold distinct visitors
     // sharing one public IP into a single counted redirect.
-    $dedupe_ident = sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ?? '' ) );
+    $dedupe_ident = function_exists('devdredi_get_client_ip') ? (string) devdredi_get_client_ip() : sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ?? '' ) );
     if (!empty($_COOKIE['ddc_sid'])) {
         $dedupe_sid = preg_replace('/[^a-f0-9]/', '', sanitize_text_field(wp_unslash($_COOKIE['ddc_sid'])));
         if (strlen($dedupe_sid) >= 8) { $dedupe_ident = 'sid:' . $dedupe_sid; }

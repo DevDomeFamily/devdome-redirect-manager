@@ -111,12 +111,13 @@ function devdredi_ipgeo_health()
     // The screen calls the REST route below; this admin-ajax twin is the fallback. It reaches
     // out to the geo service, so it takes the same nonce + capability check as everything else.
     check_ajax_referer('wp_rest', '_wpnonce');
+    devdredi_db_guard_begin(); // DESIGN.md 24
     if (!current_user_can('manage_options')) {
         wp_send_json_error(array('message' => 'forbidden'), 403);
     }
     $h = devdredi_geo_health();
     if (!empty($h['success'])) {
-        wp_send_json_success($h);
+        devdredi_json_success($h);
     }
     wp_send_json_error($h);
 }

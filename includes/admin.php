@@ -29,6 +29,7 @@ add_action('admin_menu', 'devdredi_menu');
 add_action('wp_ajax_devdredi_set_active', function () {
     if (!current_user_can('manage_options')) { wp_send_json_error('forbidden', 403); }
     check_ajax_referer('devdredi_rule_action', '_n');
+    devdredi_db_guard_begin(); // DESIGN.md 24: the handler answers through devdredi_json_success()
     $id = isset($_POST['rule']) ? sanitize_text_field(wp_unslash($_POST['rule'])) : '';
     $ids = array_map(function ($r) { return $r['id']; }, devdredi_get_rules());
     if (devdredi_rules_index_unreadable()) { wp_send_json_error('the rule list could not be read (database error); nothing was changed'); }
@@ -36,7 +37,7 @@ add_action('wp_ajax_devdredi_set_active', function () {
         if (devdredi_raw_update_setting('active_rule', $id) === false) {
             wp_send_json_error('the active rule could not be saved (database error)');
         }
-        wp_send_json_success();
+        devdredi_json_success();
     }
     wp_send_json_error('bad id');
 });
@@ -50,7 +51,7 @@ function devdredi_rule_editable_defaults()
         'open_mode' => 'same_tab', 'same_tab_delay_min' => 0, 'same_tab_delay_max' => 0, 'new_tab_delay_min' => 0, 'new_tab_delay_max' => 0,
         'after_click_enabled' => 0, 'after_click_min' => 0, 'after_click_max' => 0, 'same_tab_require_click' => 0,
         'same_tab_after_click_enabled' => 0, 'same_tab_after_click_min' => 0, 'same_tab_after_click_max' => 0,
-        'run_once' => 'ip', 'open_on_every' => 1, 'revisit_delay' => 0, 'revisit_delay_unit' => 'minutes', 'skip_bots' => 1, 'skip_old_browsers' => 0, 'never_ips_enabled' => 0, 'never_ips' => '', 'never_uas_enabled' => 0, 'never_uas' => '', 'never_roles_enabled' => 0, 'never_roles' => '', 'visitor_check' => 0, 'daily_limit_enabled' => 0, 'daily_limit_min' => 0, 'daily_limit_max' => 0, 'referrer_utm_scan' => 0, 'runtime_minutes' => 0,
+        'run_once' => 'ip', 'open_on_every' => 1, 'revisit_delay' => 0, 'revisit_delay_unit' => 'minutes', 'skip_bots' => 1, 'skip_old_browsers' => 0, 'never_ips_enabled' => 0, 'never_ips' => '', 'never_uas_enabled' => 0, 'never_uas' => '', 'never_roles_enabled' => 0, 'never_roles' => '', 'visitor_check' => 0, 'daily_limit_enabled' => 0, 'daily_limit_min' => 0, 'daily_limit_max' => 0, 'referrer_utm_scan' => 0, 'search_noindex' => 0, 'search_disallow' => 0, 'analytics_report' => 0, 'runtime_minutes' => 0,
         'run_mode' => 'unlimited', 'schedule_timezone' => '', 'geo_filter_enabled' => 0, 'geo_filter_mode' => 'whitelist',
         'geo_filter_whitelist' => '', 'geo_filter_blacklist' => '', 'trust_proxy' => 0,
         'device_desktop' => 1, 'device_mobile' => 1, 'device_tablet' => 1, 'purge_cache_on_save' => 1,
@@ -168,6 +169,7 @@ function devdredi_print_rule_rows($rm_rules, $rm_active, $rm_base, $rm_nonce)
 add_action('wp_ajax_devdredi_add_rule', function () {
     if (!current_user_can('manage_options')) { wp_send_json_error('forbidden', 403); }
     check_ajax_referer('devdredi_rule_action', '_n');
+    devdredi_db_guard_begin(); // DESIGN.md 24: the handler answers through devdredi_json_success()
     $rules = devdredi_get_rules();
     $ids = array_map(function ($r) { return $r['id']; }, $rules);
     if (devdredi_rules_index_unreadable()) {
@@ -182,13 +184,14 @@ add_action('wp_ajax_devdredi_add_rule', function () {
         wp_send_json_error('the new rule could not be saved (database error); nothing was added');
     }
     if (devdredi_raw_update_setting('active_rule', $newid) === false) {
+        devdredi_db_guard_rebase(); // the undo of the failed step is not refused by that failure
         wp_send_json_error(devdredi_save_rules($rules_before) ? 'the new rule could not be saved (database error); nothing was added' : 'the new rule was listed but could not be made active AND could not be removed again (database error); check the rule list');
     }
     $rm_base = admin_url('admin.php?page=devdome-redirect-manager');
     $rm_nonce = wp_create_nonce('devdredi_rule_action');
     $settings = devdredi_rule_editable_settings($newid);
     $settings['nickname'] = $nick;
-    wp_send_json_success(array(
+    devdredi_json_success(array(
         'id' => $newid,
         'listHtml' => devdredi_render_rule_rows($rules, $newid, $rm_base, $rm_nonce),
         'settings' => $settings,
@@ -200,6 +203,7 @@ add_action('wp_ajax_devdredi_add_rule', function () {
 add_action('wp_ajax_devdredi_rule_action', function () {
     if (!current_user_can('manage_options')) { wp_send_json_error('forbidden', 403); }
     check_ajax_referer('devdredi_rule_action', '_n');
+    devdredi_db_guard_begin(); // DESIGN.md 24: the handler answers through devdredi_json_success()
     $action  = isset($_POST['rm_action']) ? sanitize_text_field(wp_unslash($_POST['rm_action'])) : '';
     $target  = isset($_POST['rule']) ? sanitize_text_field(wp_unslash($_POST['rule'])) : '';
     $editing = isset($_POST['editing']) ? sanitize_text_field(wp_unslash($_POST['editing'])) : '';
@@ -223,6 +227,7 @@ add_action('wp_ajax_devdredi_rule_action', function () {
         $rules[] = array('id' => $newid, 'nickname' => $nick, 'priority' => count($rules) + 1);
         // Every write checked: a half-copied rule is removed again, never listed.
         if (!devdredi_copy_rule_settings($target, $newid) || !devdredi_save_rules($rules)) {
+            devdredi_db_guard_rebase(); // the undo of the failed step is not refused by that failure
             $undone = devdredi_delete_rule_settings($newid);
             $undone = devdredi_save_rules(array_values(array_filter($rules, function ($r) use ($newid) { return $r['id'] !== $newid; }))) && $undone;
             wp_send_json_error($undone ? 'the copy could not be written completely (database error); nothing was created' : 'the copy could not be written completely AND could not be removed again (database error); check the rule list');
@@ -236,7 +241,7 @@ add_action('wp_ajax_devdredi_rule_action', function () {
         unset($r);
         // Index first, rows second; a failure at either step leaves the rule whole and listed.
         if (!devdredi_save_rules($rules)) { wp_send_json_error('the rule list could not be written (database error); nothing was deleted'); }
-        if (!devdredi_delete_rule_settings($target)) { wp_send_json_error(devdredi_save_rules($before) ? 'the rule settings could not be deleted (database error); the rule was kept' : 'the rule settings could not be deleted AND the rule list could not be put back (database error); reload and check the rule list'); }
+        if (!devdredi_delete_rule_settings($target)) { devdredi_db_guard_rebase(); wp_send_json_error(devdredi_save_rules($before) ? 'the rule settings could not be deleted (database error); the rule was kept' : 'the rule settings could not be deleted AND the rule list could not be put back (database error); reload and check the rule list'); }
         if ($active === $target) { $active = $rules[0]['id']; if (devdredi_raw_update_setting('active_rule', $active) === false) { wp_send_json_error('the rule was deleted, but the active-rule pointer could not be moved (database error); reload the page'); } }
     } else {
         wp_send_json_error('bad action');
@@ -247,7 +252,7 @@ add_action('wp_ajax_devdredi_rule_action', function () {
     $fresh = devdredi_get_rules();
     $settings = array();
     foreach ($fresh as $rr) { $s = devdredi_rule_editable_settings($rr['id']); $s['nickname'] = isset($rr['nickname']) ? $rr['nickname'] : ''; $settings[$rr['id']] = $s; }
-    wp_send_json_success(array(
+    devdredi_json_success(array(
         'listHtml' => devdredi_render_rule_rows($fresh, $active, $rm_base, $rm_nonce),
         'settings' => $settings,
         'active'   => $active,
@@ -310,6 +315,7 @@ add_action('admin_init', function () {
 add_action('wp_ajax_devdredi_import', function () {
     if (!current_user_can('manage_options')) { wp_send_json_error('forbidden', 403); }
     check_ajax_referer('devdredi_io', '_n');
+    devdredi_db_guard_begin(); // DESIGN.md 24: the handler answers through devdredi_json_success()
     // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- raw JSON import payload; validated + each value sanitized below.
     $raw = (isset($_POST['payload']) && is_string($_POST['payload'])) ? wp_unslash($_POST['payload']) : '';
     if (strlen($raw) > 8 * MB_IN_BYTES) { wp_send_json_error('the file is larger than 8 MB; not a settings export'); }
@@ -360,7 +366,14 @@ add_action('wp_ajax_devdredi_import', function () {
         if (!array_key_exists($key, $allowed)) { continue; }
         $clean = devdredi_sanitize_imported_setting($key, $val, $allowed[$key]);
         if ($clean === null) { continue; }
+        // The same ranges and choices the settings screen and the abilities enforce (1.5.7): a value outside them refuses the whole file.
+        $why = devdredi_import_value_problem($key, $clean, $val);
+        if ($why !== '') { wp_send_json_error('the file holds a value the plugin does not accept (' . $name . ': ' . $why . '); nothing was changed'); }
         $writes['rule__' . $rid . '__' . $key] = $clean;
+    }
+    foreach (array_keys($valid_ids) as $rid) {
+        $why = devdredi_import_rule_problem($rid, $writes);
+        if ($why !== '') { wp_send_json_error('the file holds values the plugin does not accept for rule ' . $rid . ' (' . $why . '); nothing was changed'); }
     }
     // Picked categories and archives cover their posts on THIS site: resolve the groups here, never trust the file's.
     foreach (array_keys($valid_ids) as $rid) {
@@ -397,6 +410,7 @@ add_action('wp_ajax_devdredi_import', function () {
     }
     if (!$ok) {
         $wpdb->query('ROLLBACK');
+        devdredi_db_guard_rebase(); // the undo of the failed import is not refused by its failure
         // Non-transactional storage rolls nothing back: put the old rows back by hand and say what happened.
         // The exact old row SET (names and values), not a count: an equal-sized replacement is not "unchanged".
         $old_map = array();
@@ -427,8 +441,96 @@ add_action('wp_ajax_devdredi_import', function () {
     }
     // phpcs:enable WordPress.DB, PluginCheck.Security.DirectDB
 
-    wp_send_json_success(array('rules' => count($rules)));
+    devdredi_json_success(array('rules' => count($rules)));
 });
+
+/**
+ * The choices and ranges one imported value must respect (1.5.7, Codex 1.5.4 r1 admin.php:441): the settings screen and
+ * the abilities clamp or refuse these on every save, so a file may not smuggle a value past them. '' = fine, else why not.
+ */
+function devdredi_import_value_problem($key, $value, $raw = null)
+{
+    // The file's own text first (Codex 1.5.7 r1): "1garbage" cast to 1 and "garbage" cast to 0 are not values the screen
+    // would ever store. A number must look like a number before its range is judged.
+    $defaults = devdredi_rule_editable_defaults();
+    if (null !== $raw && isset($defaults[$key]) && (is_int($defaults[$key]) || is_float($defaults[$key]))) {
+        $raw_s = trim((string) $raw);
+        if (!is_numeric($raw_s)) {
+            return 'must be a number';
+        }
+        if (is_int($defaults[$key]) && !preg_match('/^-?\d+$/', $raw_s)) {
+            return 'must be a whole number'; // "1.9" is not a switch value and "-0.5" is not a count (Codex r2)
+        }
+        $value = $raw_s + 0; // judge the file's own number below, not the cast
+    }
+    $enums = array(
+        'what_to_redirect' => array('entire_website', 'selected_existing', 'custom_urls', 'all_404', 'referrer'),
+        'redirect_type' => array('js', '301', '302', '307', '308', 'meta'), 'redirect_source' => array('provided', 'found', 'transit'),
+        'links_mode' => array('sequential', 'random', 'descending', 'skip_domain'), 'open_mode' => array('same_tab', 'new_tab'),
+        'run_once' => array('never', 'ip', 'ip_ua'), 'revisit_delay_unit' => array('minutes', 'hours', 'days'),
+        'run_mode' => array('unlimited', 'set_time'), 'fallback_mode' => array('leave', 'send'), 'geo_filter_mode' => array('whitelist', 'blacklist'),
+        'plugin_state' => array('stopped'),
+    );
+    if (isset($enums[$key])) {
+        return in_array((string) $value, $enums[$key], true) ? '' : 'must be one of ' . implode(', ', $enums[$key]);
+    }
+    $flags = array('outside_only', 'links_repeat', 'after_click_enabled', 'same_tab_require_click', 'same_tab_after_click_enabled', 'skip_bots', 'skip_old_browsers',
+        'never_ips_enabled', 'never_uas_enabled', 'never_roles_enabled', 'visitor_check', 'daily_limit_enabled', 'referrer_utm_scan', 'search_noindex', 'search_disallow',
+        'analytics_report', 'geo_filter_enabled', 'trust_proxy', 'device_desktop', 'device_mobile', 'device_tablet', 'purge_cache_on_save', 'referrer_only_selected');
+    if (in_array($key, $flags, true)) {
+        return ((int) $value === 0 || (int) $value === 1) ? '' : 'must be 0 or 1';
+    }
+    $ranges = array( // key => array(min, max)
+        'open_on_every' => array(1, PHP_INT_MAX), 'revisit_delay' => array(0, PHP_INT_MAX), 'runtime_minutes' => array(0, PHP_INT_MAX),
+        'daily_limit_min' => array(0, 100000000), 'daily_limit_max' => array(0, 100000000), 'descending_spread' => array(0, 1),
+        'same_tab_delay_min' => array(0, PHP_INT_MAX), 'same_tab_delay_max' => array(0, PHP_INT_MAX), 'new_tab_delay_min' => array(0, PHP_INT_MAX), 'new_tab_delay_max' => array(0, PHP_INT_MAX),
+        'after_click_min' => array(0, 4), 'after_click_max' => array(0, 4), 'same_tab_after_click_min' => array(0, 4), 'same_tab_after_click_max' => array(0, 4),
+    );
+    if (isset($ranges[$key])) {
+        return (is_numeric($value) && $value >= $ranges[$key][0] && $value <= $ranges[$key][1]) ? '' : 'must be a number from ' . $ranges[$key][0] . ' to ' . ($ranges[$key][1] === PHP_INT_MAX ? 'any' : $ranges[$key][1]);
+    }
+    if ($key === 'schedule_timezone') {
+        return ((string) $value === '' || in_array((string) $value, timezone_identifiers_list(), true)) ? '' : 'must be a timezone name such as Europe/Berlin';
+    }
+    if ($key === 'schedule_start_date' || $key === 'schedule_end_date') {
+        if ((string) $value === '') { return ''; }
+        return (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', (string) $value, $dm) && checkdate((int) $dm[2], (int) $dm[3], (int) $dm[1])) ? '' : 'must be a real date as YYYY-MM-DD';
+    }
+    if ($key === 'run_weekdays') {
+        foreach ((array) $value as $d) { if (!is_numeric($d) || (int) $d < 1 || (int) $d > 7) { return 'weekdays are 1 to 7'; } }
+        return '';
+    }
+    if ($key === 'specific_times') {
+        if (count((array) $value) > 3) { return 'at most 3 time windows'; }
+        foreach ((array) $value as $w) {
+            $hhmm = '/^([01]\d|2[0-3]):[0-5]\d$/';
+            if (!is_array($w) || !preg_match($hhmm, (string) (isset($w['start']) ? $w['start'] : '')) || !preg_match($hhmm, (string) (isset($w['end']) ? $w['end'] : ''))) { return 'time windows need start and end as HH:MM (00:00 to 23:59)'; }
+            if (isset($w['enable']) && (int) $w['enable'] !== 0 && (int) $w['enable'] !== 1) { return 'a time window switch is 0 or 1'; }
+        }
+        return '';
+    }
+    if (in_array($key, array('geo_filter_whitelist', 'geo_filter_blacklist', 'geo_filter_country_codes'), true)) {
+        return ((string) $value === '' || preg_match('/^[A-Za-z]{2}(,[A-Za-z]{2})*$/', str_replace(' ', '', (string) $value))) ? '' : 'must be two-letter country codes separated by commas';
+    }
+    if ($key === 'transit_domain') {
+        return ((string) $value === '' || preg_match('/^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))+$/', (string) $value)) ? '' : 'must be a domain name';
+    }
+    if ($key === 'fallback_url') {
+        return ((string) $value === '' || preg_match('#^https?://#i', (string) $value)) ? '' : 'must be an http or https address';
+    }
+    return '';
+}
+
+/** Cross-setting rules for one imported rule (a lower bound above its upper bound, a delay range upside down). */
+function devdredi_import_rule_problem($rid, $writes)
+{
+    $v = function ($k, $d = 0) use ($rid, $writes) { return isset($writes['rule__' . $rid . '__' . $k]) ? $writes['rule__' . $rid . '__' . $k] : $d; };
+    if ((float) $v('daily_limit_max') > 0 && (float) $v('daily_limit_min') > (float) $v('daily_limit_max')) { return 'daily_limit_min is above daily_limit_max'; }
+    foreach (array('same_tab_delay', 'new_tab_delay', 'after_click', 'same_tab_after_click') as $pair) {
+        if ((float) $v($pair . '_min') > (float) $v($pair . '_max')) { return $pair . '_min is above ' . $pair . '_max'; }
+    }
+    return '';
+}
 
 /**
  * Clean one imported setting value against the canonical default for that key. The default's
@@ -588,6 +690,7 @@ function devdredi_handle_rule_actions()
     }
     $action = sanitize_text_field(wp_unslash($_GET['rm_rule_action']));
     $target = isset($_GET['rm_rule_id']) ? sanitize_text_field(wp_unslash($_GET['rm_rule_id'])) : '';
+    devdredi_db_guard_begin(); // DESIGN.md 24: the redirect below means done only when no query failed
 
     if ($action === 'add') {
         $newid = devdredi_new_rule_id($ids);
@@ -597,6 +700,7 @@ function devdredi_handle_rule_actions()
             wp_die(esc_html__('The new rule could not be saved (database error); nothing was added.', 'devdome-redirect-manager'));
         }
         if (devdredi_raw_update_setting('active_rule', $newid) === false) {
+            devdredi_db_guard_rebase(); // the undo of the failed step is not refused by that failure
             wp_die(devdredi_save_rules($rules_before) ? esc_html__('The new rule could not be saved (database error); nothing was added.', 'devdome-redirect-manager') : esc_html__('The new rule was listed but could not be made active AND could not be removed again (database error); check the rule list.', 'devdome-redirect-manager'));
         }
         } elseif ($action === 'duplicate' && in_array($target, $ids, true)) {
@@ -610,6 +714,7 @@ function devdredi_handle_rule_actions()
         $rules[] = array('id' => $newid, 'nickname' => $nick, 'priority' => count($rules) + 1);
         // Every write checked: a half-copied rule is removed again, never listed.
         if (!devdredi_copy_rule_settings($target, $newid) || !devdredi_save_rules($rules)) {
+            devdredi_db_guard_rebase(); // the undo of the failed step is not refused by that failure
             $undone = devdredi_delete_rule_settings($newid);
             $undone = devdredi_save_rules(array_values(array_filter($rules, function ($r) use ($newid) { return $r['id'] !== $newid; }))) && $undone;
             wp_die($undone ? esc_html__('The copy could not be written completely (database error); nothing was created.', 'devdome-redirect-manager') : esc_html__('The copy could not be written completely AND could not be removed again (database error); check the rule list.', 'devdome-redirect-manager'));
@@ -629,6 +734,7 @@ function devdredi_handle_rule_actions()
             wp_die(esc_html__('The rule list could not be written (database error); nothing was deleted.', 'devdome-redirect-manager'));
         }
         if (!devdredi_delete_rule_settings($target)) {
+            devdredi_db_guard_rebase(); // the undo of the failed step is not refused by that failure
             wp_die(devdredi_save_rules($before) ? esc_html__('The rule settings could not be deleted (database error); the rule was kept.', 'devdome-redirect-manager') : esc_html__('The rule settings could not be deleted AND the rule list could not be put back (database error); reload and check the rule list.', 'devdome-redirect-manager'));
         }
         if (devdredi_raw_get_setting('active_rule', '') === $target) {
@@ -646,6 +752,10 @@ function devdredi_handle_rule_actions()
         }
     }
 
+    if (devdredi_db_guard_failed()) {
+        wp_die(esc_html(devdredi_db_guard_message())); // DESIGN.md 24: a query failed and no step above reported it
+    }
+    devdredi_db_guard_end();
     // Clean URL so the action doesn't re-run on refresh.
     wp_safe_redirect(admin_url('admin.php?page=devdome-redirect-manager'));
     exit;
@@ -669,6 +779,7 @@ function devdredi_admin_index_readable()
 
 function devdredi_settings_page()
 {
+    devdredi_db_guard_begin(); // DESIGN.md 24: a page built over a failed query says so (banner printed at the end, lifted to the top)
     devdredi_check_status_and_schedule();
 
     // The client-side rule switcher posts the rule being edited so Save/Run/Stop/Reset target the
@@ -705,11 +816,26 @@ function devdredi_settings_page()
     }
 
 
+    if ($Post && !empty($GLOBALS['devdredi_switch_failed'])) {
+        // The rule to edit could not be selected: scoped writes would land on the stale rule (1.5.7, Codex 1.5.4 r1).
+        $GLOBALS['devdredi_write_failed'] = true;
+        echo '<div class="error"><p>' . esc_html__('The rule to edit could not be selected (database write failed); nothing was saved. Reload and try again.', 'devdome-redirect-manager') . '</p></div>';
+        $Post = false;
+    }
+    $save_snapshot = null;
     if ($Post && ($rm_rules_verified = devdredi_admin_index_readable()) !== false) {
 
         // Rule metadata: nickname of the active rule + drag order (priorities).
         $rm_rules_save = $rm_rules_verified;
+        unset($GLOBALS['devdredi_read_failed']);
         $rm_active_save = devdredi_raw_get_setting('active_rule', $rm_rules_save[0]['id']);
+        // Atomic save (1.5.7): every row of the rule is copied before the first write; a failed write puts the copy back,
+        // so visitors never meet a half-changed running rule.
+        $save_snapshot = empty($GLOBALS['devdredi_read_failed']) ? devdredi_ability_snapshot_rule($rm_active_save) : null;
+        if ($save_snapshot === null) {
+            $GLOBALS['devdredi_write_failed'] = true;
+            echo '<div class="error"><p>' . esc_html__('The rule could not be read (database error); nothing was saved. Reload and try again.', 'devdome-redirect-manager') . '</p></div>';
+        } else {
         if (isset($_POST['rule_nickname'])) {
             $nick = sanitize_text_field(wp_unslash($_POST['rule_nickname']));
             foreach ($rm_rules_save as &$r) {
@@ -989,6 +1115,21 @@ function devdredi_settings_page()
         foreach (array('never_ips_enabled', 'never_uas_enabled', 'never_roles_enabled') as $never_flag) {
             devdredi_update_setting($never_flag, isset($_POST[$never_flag]) ? 1 : 0);
         }
+        // Hide From Search (1.5.7): two separate switches, each doing one thing.
+        devdredi_update_setting('search_noindex', isset($_POST['search_noindex']) ? 1 : 0);
+        devdredi_update_setting('search_disallow', isset($_POST['search_disallow']) ? 1 : 0);
+        // DevDome Analytics click reports (1.5.7): the consent switch. Off drops the cached hop token; on fetches it here, off the visitor path.
+        $analytics_report_new = isset($_POST['analytics_report']) ? 1 : 0;
+        $analytics_consent_saved = devdredi_update_setting('analytics_report', $analytics_report_new);
+        if ($analytics_report_new) {
+            // The fetch carries the site identity: only after the consent row really landed, with the account connected and the
+            // Analytics plugin's outbound switch not off (Codex r2).
+            if ($analytics_consent_saved !== false && empty($GLOBALS['devdredi_write_failed']) && devdredi_analytics_identity() !== null && !devdredi_analytics_outbound_blocked()) {
+                devdredi_hop_config(true);
+            }
+        } else {
+            devdredi_hop_config_clear();
+        }
         devdredi_update_setting('never_ips', devdredi_never_clean_ips(isset($_POST['never_ips']) ? sanitize_textarea_field(wp_unslash($_POST['never_ips'])) : ''));
         devdredi_update_setting('never_uas', devdredi_never_clean_uas(isset($_POST['never_uas']) ? sanitize_textarea_field(wp_unslash($_POST['never_uas'])) : ''));
         devdredi_update_setting('never_roles', devdredi_never_clean_roles(isset($_POST['never_roles']) && is_array($_POST['never_roles']) ? array_map('sanitize_key', wp_unslash($_POST['never_roles'])) : array()));
@@ -1022,10 +1163,17 @@ function devdredi_settings_page()
 
         } while (false);
         if (!empty($GLOBALS['devdredi_write_failed']) || !empty($GLOBALS['devdredi_read_failed'])) {
-            echo '<div class="error"><p>' . esc_html__('The settings could not be saved completely (database error). Reload the rule and check its settings before running it.', 'devdome-redirect-manager') . '</p></div>';
+            // Put the rule back exactly as it was. The undo is not refused by the failure it undoes.
+            devdredi_db_guard_rebase();
+            $put_back = devdredi_ability_restore_rule($rm_active_save, $save_snapshot, $rm_rules_verified);
+            $GLOBALS['devdredi_write_failed'] = true; // Run stays blocked either way
+            echo '<div class="error"><p>' . esc_html($put_back
+                ? __('The settings could not be saved (database error); the rule was put back as it was and nothing changed.', 'devdome-redirect-manager')
+                : __('The settings could not be saved (database error) AND the rule could not be put back exactly as it was; reload the rule and check its settings before running it.', 'devdome-redirect-manager')) . '</p></div>';
         } else {
             echo '<div class="updated"><p>Settings saved!</p></div>';
         }
+        } // the rule was readable and copied before the first write
 
         devdredi_check_status_and_schedule();
 
@@ -1058,6 +1206,7 @@ function devdredi_settings_page()
             $has_start  = (int) devdredi_raw_get_setting('rule__' . $run_rid . '__start_time', 0) > 0;
             if (!$state_ok || !$is_running || !$has_start) {
                 // Do not leave it half started: a checked, explicit-rule stop, and the notice says what really happened.
+                devdredi_db_guard_rebase(); // the stop undoes the failed start; it is not refused by that failure (DESIGN.md 24)
                 $recovered = devdredi_raw_update_setting('rule__' . $run_rid . '__plugin_state', 'stopped') !== false
                     && (string) devdredi_raw_get_setting('rule__' . $run_rid . '__plugin_state', 'running') === 'stopped';
                 echo '<div class="error"><p>' . esc_html($recovered
@@ -1111,6 +1260,17 @@ function devdredi_settings_page()
 
     if (!empty($_POST['devdredi_return'])) {
         check_admin_referer('devdredi_save_settings', 'devdredi_nonce');
+        // The reset is bound to the rule the screen asked for (1.5.7, Codex 1.5.4 r1): a failed switch or an unreadable
+        // pointer used to reset whichever rule the stale pointer named.
+        unset($GLOBALS['devdredi_read_failed']);
+        $return_rid = (string) devdredi_active_rule_id();
+        $return_req = isset($_POST['rm_editing_rule']) ? sanitize_text_field(wp_unslash($_POST['rm_editing_rule'])) : $return_rid;
+        if (!empty($GLOBALS['devdredi_switch_failed']) || !empty($GLOBALS['devdredi_read_failed']) || $return_rid !== $return_req) {
+            $GLOBALS['devdredi_write_failed'] = true;
+            echo '<div class="error"><p>' . esc_html__('The rule was NOT reset: the rule to edit could not be selected (database error). Reload and try again.', 'devdome-redirect-manager') . '</p></div>';
+        } else {
+        $return_prev_rule = isset($GLOBALS['devdredi_rule']) ? $GLOBALS['devdredi_rule'] : null;
+        $GLOBALS['devdredi_rule'] = $return_rid; // every write below lands on this verified rule, whatever a later pointer read answers
 
         devdredi_update_setting('links_list', '');
         devdredi_update_setting('selected_links_list', '');
@@ -1168,6 +1328,9 @@ function devdredi_settings_page()
             'daily_limit_min' => 0,
             'daily_limit_max' => 0,
             'referrer_utm_scan' => 0,
+            'search_noindex' => 0,
+            'search_disallow' => 0,
+            'analytics_report' => 0,
             'geo_filter_country_codes' => '',
             'geo_filter_mode' => 'whitelist',
             'geo_filter_whitelist' => '',
@@ -1188,7 +1351,9 @@ function devdredi_settings_page()
         foreach ($default_settings as $name => $value) {
             devdredi_update_setting($name, $value);
         }
-
+        devdredi_hop_config_clear(); // the reports are off again
+        $GLOBALS['devdredi_rule'] = $return_prev_rule;
+        }
     }
 
 
@@ -1231,6 +1396,9 @@ function devdredi_settings_page()
     $never_ips_enabled = (int) devdredi_get_setting('never_ips_enabled', 0);
     $never_uas_enabled = (int) devdredi_get_setting('never_uas_enabled', 0);
     $never_roles_enabled = (int) devdredi_get_setting('never_roles_enabled', 0);
+    $search_noindex = (int) devdredi_get_setting('search_noindex', 0);
+    $search_disallow = (int) devdredi_get_setting('search_disallow', 0);
+    $analytics_report = (int) devdredi_get_setting('analytics_report', 0);
     $never_ips = (string) devdredi_get_setting('never_ips', '');
     $never_uas = (string) devdredi_get_setting('never_uas', '');
     $never_roles = array_filter(explode(',', (string) devdredi_get_setting('never_roles', '')));
@@ -2997,6 +3165,39 @@ function devdredi_settings_page()
                         <p class="dd-hint">Logged-in users with a ticked role are skipped. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Select the roles used by people working on this site, such as Administrator and Editor. A logged-in user with any selected role is not redirected, is not sent to the bypass link and is counted with the skipped bots instead of visitors. This does not apply when the user is logged out. A page cache may serve a stored page without checking the user's role, so a cached redirect may still run. Leave all roles unchecked to skip nobody by role.</span></span></p>
                     </td>
                 </tr>
+                <tr>
+                    <th>Noindex Header</th>
+                    <td>
+                        <label>
+                            <input type="checkbox" name="search_noindex" value="1" <?php checked($search_noindex, 1); ?>>
+                            Tell search engines not to index the redirected addresses
+                        </label>
+                        <p class="dd-hint">Sends an X-Robots-Tag: noindex, nofollow header on every address this rule targets while it runs. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">The header goes out to search engines and visitors alike, before the plugin decides who is redirected, so a crawler that stays on the page still sees it. The address drops out of search results over time and links on it pass no credit. A rule for the entire website sends it on every page, so use it there only when the whole site should leave the index. Off by default. Nothing is written to any file.</span></span></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th>Robots.txt Disallow</th>
+                    <td>
+                        <label>
+                            <input type="checkbox" name="search_disallow" value="1" <?php checked($search_disallow, 1); ?>>
+                            Ask search engines not to crawl the redirected addresses
+                        </label>
+                        <p class="dd-hint">Lists this rule's Custom URLs or Selected existing URLs in the site's robots.txt while the rule runs. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">WordPress serves a virtual robots.txt; this adds one Disallow line per listed path under User-agent: *. Rules for the entire website, all 404 pages or referring websites have no fixed path and add nothing. Disallow stops crawling, not indexing: an address already in the index can stay listed without a description, so combine it with the noindex header to remove it. A robots.txt file on disk replaces the virtual one and is never changed by the plugin. Off by default.</span></span></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th>Report To DevDome Analytics</th>
+                    <td>
+                        <label>
+                            <input type="checkbox" name="analytics_report" value="1" <?php checked($analytics_report, 1); ?>>
+                            Report this rule's redirects to DevDome Analytics
+                        </label>
+                        <?php if (devdredi_analytics_identity() === null) : ?>
+                        <p class="description">The DevDome account is not connected on this site, so nothing is sent until it is. Connect it on the DevDome screen.</p>
+                        <?php endif; ?>
+                        <p class="dd-hint">Each redirect this rule makes is sent to your DevDome Analytics dashboard as a redirect event. <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">Sent from your server to analytics.devdome.com for every redirect: the source page, the destination, the referrer, the visitor's IP address and browser string, the country when the site sits behind Cloudflare, and the DevDome Analytics visitor and session ids when its tracker set them. When the destination is another site connected to the same DevDome account, an opaque token (?d=) is added to the address so that site credits the visit to this one; the token is fetched from analytics.devdome.com, cached for six hours and dropped when the account is disconnected or this box is cleared. Off by default. Nothing is sent while the account is not connected. See External services in the readme.</span></span></p>
+                    </td>
+                </tr>
             </table>
 
 
@@ -4182,7 +4383,7 @@ function devdredi_settings_page()
              ['same_tab_require_click',s.same_tab_require_click],['same_tab_after_click_enabled',s.same_tab_after_click_enabled],
              ['geo_filter_enabled',s.geo_filter_enabled],['trust_proxy',s.trust_proxy],
              ['device_desktop',s.device_desktop],['device_mobile',s.device_mobile],['device_tablet',s.device_tablet],
-             ['purge_cache_on_save',s.purge_cache_on_save],['referrer_only_selected',s.referrer_only_selected],['skip_bots',s.skip_bots],['skip_old_browsers',s.skip_old_browsers],['visitor_check',s.visitor_check],['daily_limit_enabled',s.daily_limit_enabled],['never_ips_enabled',s.never_ips_enabled],['never_uas_enabled',s.never_uas_enabled],['never_roles_enabled',s.never_roles_enabled],['referrer_utm_scan',s.referrer_utm_scan],['outside_only',s.outside_only]
+             ['purge_cache_on_save',s.purge_cache_on_save],['referrer_only_selected',s.referrer_only_selected],['skip_bots',s.skip_bots],['skip_old_browsers',s.skip_old_browsers],['visitor_check',s.visitor_check],['daily_limit_enabled',s.daily_limit_enabled],['never_ips_enabled',s.never_ips_enabled],['never_uas_enabled',s.never_uas_enabled],['never_roles_enabled',s.never_roles_enabled],['referrer_utm_scan',s.referrer_utm_scan],['outside_only',s.outside_only],['search_noindex',s.search_noindex],['search_disallow',s.search_disallow],['analytics_report',s.analytics_report]
             ].forEach(function(p){ setCheck(p[0],p[1]); });
 
             // numbers
@@ -4364,6 +4565,14 @@ function devdredi_settings_page()
     })();
     <?php }); ?>
     <?php
+    if (devdredi_db_guard_failed()) {
+        // DESIGN.md 24: printed after the page (nothing is buffered), lifted to the top of the app by the footer script.
+        echo '<div class="dd-banner" id="devdredi-guard-banner" style="border:1px solid #fecaca;background:#fef2f2;color:#991b1b;padding:10px 14px;border-radius:8px;margin:16px 0;">'
+            . esc_html__('A database query failed while this page was built, so what it shows may be incomplete or stale. Reload the page; if it keeps happening, check the database with your host.', 'devdome-redirect-manager')
+            . '</div>';
+        devdredi_admin_inline_js('(function(){var b=document.getElementById("devdredi-guard-banner"),a=document.querySelector(".dd-app");if(b&&a){a.insertBefore(b,a.firstChild);}})();');
+    }
+    devdredi_db_guard_end();
 }
 
 
