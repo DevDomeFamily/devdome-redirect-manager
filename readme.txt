@@ -4,7 +4,7 @@ Tags: url rotator, link rotator, geo redirect, geotargeting, device redirect
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.5.7
+Stable tag: 1.5.8
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -258,6 +258,10 @@ Those two build inputs are not included in the distributed package. Ask for them
 5. Scheduling: run a redirect rule between dates and times in your timezone.
 
 == Changelog ==
+
+= 1.5.8 =
+
+* The Selected existing URLs picker lists up to 100 pages or posts before you type (was 30, so a site with more pages could not see the ones past the cut) and says "Showing 100 of 530. Type to find more." when there are more. Typing part of a title or address finds any page, as before.
 
 = 1.5.7 =
 

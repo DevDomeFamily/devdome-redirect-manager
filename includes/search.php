@@ -183,7 +183,7 @@ function devdredi_search_category_terms($q, $limit = 20)
  * pages; 'post' searches blog posts and every other public post type (WooCommerce products, custom types), each
  * non-post item labelled with its type, so a single product review can be picked too.
  */
-function devdredi_search_posts($post_type, $q, $limit = 20)
+function devdredi_search_posts($post_type, $q, $limit = 20, &$total = null)
 {
     $parts = devdredi_search_query_parts($q);
     $types = array('page');
@@ -195,7 +195,7 @@ function devdredi_search_posts($post_type, $q, $limit = 20)
         'post_type'      => $types,
         'posts_per_page' => max(1, (int) $limit),
         'post_status'    => 'publish',
-        'no_found_rows'  => true,
+        'no_found_rows'  => false, // $total = every match, so the picker can say how many lie past the cap (1.5.8)
         'orderby'        => 'title',
         'order'          => 'ASC',
     );
@@ -215,7 +215,8 @@ function devdredi_search_posts($post_type, $q, $limit = 20)
     if ($where_cb) {
         remove_filter('posts_where', $where_cb);
     }
-    $rows = array();
+    $total = (int) $query->found_posts;
+    $rows  = array();
     foreach ($query->posts as $p) {
         $label = (string) get_the_title($p);
         if ($p->post_type !== 'post' && $p->post_type !== 'page') {
@@ -229,12 +230,13 @@ function devdredi_search_posts($post_type, $q, $limit = 20)
 }
 
 /** Picker rows of one tab: categories = archives + terms of every taxonomy; page and post = those post types. */
-function devdredi_search_rows($type, $q, $limit)
+function devdredi_search_rows($type, $q, $limit, &$total = null)
 {
     if ($type === 'category') {
+        $total = null;
         return array_slice(array_merge(devdredi_search_archives($q, $limit), devdredi_search_category_terms($q, $limit)), 0, max(1, (int) $limit));
     }
-    return devdredi_search_posts($type === 'post' ? 'post' : 'page', $q, $limit);
+    return devdredi_search_posts($type === 'post' ? 'post' : 'page', $q, $limit, $total);
 }
 
 /**
@@ -250,12 +252,17 @@ function devdredi_search_content($request)
     $parts = devdredi_search_query_parts($q);
     $items = array();
     $seen  = array();
+    $total = null; // every page or post the open tab matches, beyond the cap too (null on the Categories tab)
     foreach (array_values(array_unique(array($type, 'category', 'page', 'post'))) as $tab) {
         if ($tab !== $type && $parts['last'] === '') {
             break; // an empty search lists the open tab only
         }
-        $limit = $tab !== $type ? 10 : ($tab === 'category' ? 100 : 30);
-        foreach (devdredi_search_rows($tab, $q, $limit) as $row) {
+        // The open tab lists up to 100 (was 30: a site with 53 pages hid page 38 and the user thought the plugin could
+        // not see it, support mail 2026-10-14); the other tabs add 10 each. The reply carries the open tab's total so
+        // the picker can say "Showing 100 of 530. Type to find more."
+        $limit     = $tab !== $type ? 10 : 100;
+        $tab_total = null;
+        foreach (devdredi_search_rows($tab, $q, $limit, $tab_total) as $row) {
             $value = wp_make_link_relative($row['link']);
             if (isset($seen[$value])) {
                 continue;
@@ -268,7 +275,10 @@ function devdredi_search_content($request)
                 'other' => $tab !== $type,
             );
         }
+        if ($tab === $type) {
+            $total = $tab_total;
+        }
     }
 
-    return new WP_REST_Response(array('items' => $items), 200);
+    return new WP_REST_Response(array('items' => $items, 'total' => $total), 200);
 }

@@ -2233,6 +2233,7 @@ function devdredi_settings_page()
                     var pkType = 'category';
                     var pkTimer = null;
                     var pkLast = [];
+                    var pkTotal = null; // how many pages/posts the open tab matches in all; the list shows at most 100 (1.5.8)
                     var items = [];
                     try { items = JSON.parse(pkMeta.value || '[]') || []; } catch (e) { items = []; }
                     var GROUPS = [{ type: 'category', title: 'Selected Categories' }, { type: 'page', title: 'Selected Pages' }, { type: 'post', title: 'Selected Posts' }];
@@ -2263,7 +2264,7 @@ function devdredi_settings_page()
                                 var hits = document.createElement('span'); hits.className = 'dd-sel-hits'; hits.appendChild(document.createTextNode('Redirects: '));
                                 var hitsNum = document.createElement('span'); hitsNum.className = 'dd-sel-hits-num'; hitsNum.textContent = String(window.ddSourceCount ? window.ddSourceCount(i.url) : (i.redirects || 0)); hits.appendChild(hitsNum);
                                 var x = document.createElement('span'); x.className = 'dd-sel-x'; x.title = 'Remove'; x.textContent = 'Remove';
-                                x.addEventListener('click', function () { pkRemove(i.url); pkRenderResults(pkLast); });
+                                x.addEventListener('click', function () { pkRemove(i.url); pkRenderResults(pkLast, pkTotal); });
                                 actions.appendChild(hits); actions.appendChild(x);
                                 row.appendChild(info); row.appendChild(actions);
                                 wrap.appendChild(row);
@@ -2272,7 +2273,7 @@ function devdredi_settings_page()
                         });
                         ddToggleRemoveAll('dd-pick-removeall', items.length > 0);
                     }
-                    ddWireRemoveAll('dd-pick-removeall', function () { items = []; pkSync(); pkRenderSelected(); pkRenderResults(pkLast); });
+                    ddWireRemoveAll('dd-pick-removeall', function () { items = []; pkSync(); pkRenderSelected(); pkRenderResults(pkLast, pkTotal); });
                     pkRenderSelected();
 
                     function pkResultsHead() {
@@ -2296,7 +2297,7 @@ function devdredi_settings_page()
                         }
                         if (idx < text.length) container.appendChild(document.createTextNode(text.slice(idx)));
                     }
-                    function pkRenderResults(list) {
+                    function pkRenderResults(list, total) {
                         var q = pkSearch.value.trim();
                         pkResults.innerHTML = '';
                         pkResults.appendChild(pkResultsHead());
@@ -2323,10 +2324,17 @@ function devdredi_settings_page()
                             row.addEventListener('click', function (e) {
                                 e.stopPropagation();
                                 if (pkHas(it.value)) { pkRemove(it.value); } else { pkAdd(it.label, it.value, it.type || pkType); }
-                                pkRenderResults(list);
+                                pkRenderResults(list, total);
                             });
                             pkResults.appendChild(row);
                         });
+                        // More matches than the list holds: say so, or a user with 53 pages thinks page 38 does not exist.
+                        var shown = list.filter(function (it) { return !it.other; }).length;
+                        if (typeof total === 'number' && total > shown) {
+                            var more = document.createElement('div'); more.className = 'dd-pick-empty dd-pick-more';
+                            more.textContent = 'Showing ' + shown + ' of ' + total + '. Type to find more.';
+                            pkResults.appendChild(more);
+                        }
                         pkResults.style.display = 'block';
                     }
                     var pkSeq = 0;
@@ -2337,7 +2345,7 @@ function devdredi_settings_page()
                         // Plain permalinks give rest_url() as index.php?rest_route=..., so the query joins with & (a second ? made a 404, 1.4.2).
                         fetch(DDRM.url + (DDRM.url.indexOf('?') === -1 ? '?' : '&') + 'type=' + encodeURIComponent(pkType) + '&q=' + encodeURIComponent(q), { headers: { 'X-WP-Nonce': DDRM.nonce } })
                             .then(function (r) { return r.json(); })
-                            .then(function (d) { if (seq !== pkSeq) { return; } pkLast = (d && d.items) ? d.items : []; pkRenderResults(pkLast); })
+                            .then(function (d) { if (seq !== pkSeq) { return; } pkLast = (d && d.items) ? d.items : []; pkTotal = (d && typeof d.total === 'number') ? d.total : null; pkRenderResults(pkLast, pkTotal); })
                             .catch(function () { pkResults.innerHTML = '<div class="dd-pick-empty">Search failed.</div>'; pkResults.style.display = 'block'; });
                     }
                     pkSearch.addEventListener('input', function () { clearTimeout(pkTimer); pkTimer = setTimeout(pkFetch, 250); });
