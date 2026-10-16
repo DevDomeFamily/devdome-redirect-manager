@@ -70,7 +70,26 @@ function devdredi_reset_stats()
         return false; // the counter could not be read: never write a guessed value over it
     }
     devdredi_update_setting('reset_count', $rc + 1);
+    devdredi_delete_nth_transients($rule_scope);
     return empty($GLOBALS['devdredi_write_failed']);
+}
+
+/**
+ * "Open on every Nth visitor" stores one year-long transient per visitor, named with the rule id and the reset
+ * count. The reset above bumps that count, so every row of this rule is dead from here on but would sit in
+ * wp_options for up to a year (two rows per visitor). Remove them now; nothing to do with a persistent object
+ * cache, where transients never touch the options table.
+ */
+function devdredi_delete_nth_transients($rule_scope)
+{
+    if (wp_using_ext_object_cache()) {
+        return;
+    }
+    global $wpdb;
+    $like  = $wpdb->esc_like('_transient_devdredi_nth_' . $rule_scope . '_') . '%';
+    $like2 = $wpdb->esc_like('_transient_timeout_devdredi_nth_' . $rule_scope . '_') . '%';
+    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- the plugin's own dead transients; no WP API deletes by prefix.
+    $wpdb->query($wpdb->prepare("DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s", $like, $like2));
 }
 
 /**

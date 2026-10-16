@@ -4,7 +4,7 @@ Tags: url rotator, link rotator, geo redirect, geotargeting, device redirect
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.5.8
+Stable tag: 1.5.9
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -213,6 +213,8 @@ New rules start stopped unless requested otherwise. Updates are all or nothing. 
 
 == External services ==
 
+**Error reports (`devdome.com`), only when you press "Report this error" on an error message.** The plugin sends the error text, the plugin, bundled library, WordPress and PHP versions, whether the site is a multisite, the site locale, the screen you were on, your site address, the generated site ID, your DevDome account ID if the site is connected, and your admin e-mail (so support can reply) to `https://devdome.com/api/plugin/error-report`. No redirect rules, visitor data or statistics are included. Nothing is sent unless you press the button.
+
 **Plugin catalog (`devdome.com`).** The DevDome Dashboard in wp-admin fetches the list of DevDome plugins (names, descriptions, logos, links, WordPress.org slugs) from `https://devdome.com/wp-plugins/catalog.json` at most once every 12 hours. Only the bundled core version is sent; no site or visitor data.
 
 The plugin can also talk to the DevDome services below, all optional. Service provider for every service here: DevDome. Terms of service: https://devdome.com/terms-of-service . Privacy policy: https://devdome.com/privacy-policy .
@@ -258,6 +260,14 @@ Those two build inputs are not included in the distributed package. Ask for them
 5. Scheduling: run a redirect rule between dates and times in your timezone.
 
 == Changelog ==
+
+= 1.5.9 =
+
+* A dismissible note at the top of the settings page mentions the free DevDome Analytics plugin, with a button that opens the plugin installer (or the Analytics screen when it is already active). Dismiss hides it for good.
+* Shared DevDome library 1.7.13: uninstalling the last DevDome plugin also removes the note's dismissal, the update-repair records and the per-user "Report a bug" flag; the visitor-beacon flood guard keeps one short-lived record per address and clears its expired ones itself, and behind Cloudflare it counts per visitor instead of per Cloudflare address.
+* External services lists the "Report this error" button and what it sends.
+* Link rotation keeps its position for the newest 20,000 visitors of a rule and forgets the oldest, so a busy rotation rule no longer grows one database record without limit.
+* Resetting a rule's statistics also removes that rule's stored "Open on every Nth visitor" records, which the reset had already made unusable but left in the database for up to a year.
 
 = 1.5.8 =
 

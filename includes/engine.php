@@ -191,6 +191,15 @@ function devdredi_schedule_permanently_over() {
     return ($end_date !== '' && devdredi_schedule_parts()['Ymd'] > $end_date);
 }
 
+/**
+ * The three rotation maps hold one entry per rule and visitor with nothing that expires them: every new visitor
+ * to a rotation rule added a key for good (test2 had 65 after light testing; a busy site rewrites the whole map
+ * on every redirect). Keep the newest 20,000 keys, the same cap as last_redirects, and drop the oldest.
+ */
+function devdredi_rotation_cap(array $map, $cap = 20000) {
+    return count($map) > $cap ? array_slice($map, count($map) - $cap, null, true) : $map;
+}
+
 function devdredi_pick_link(array $links, $mode='sequential', $visitor_key='', $descending_spread=0.5, $descending_seed=0, $repeat=1) {
     $links = array_values(array_filter($links)); 
     if (!$links) return '';
@@ -218,7 +227,7 @@ function devdredi_pick_link(array $links, $mode='sequential', $visitor_key='', $
 
                 $selected_index = array_shift($queue);
                 $queues[$visitor_key] = $queue;
-                update_option('devdredi_user_random_queue', $queues, false);
+                update_option('devdredi_user_random_queue', devdredi_rotation_cap($queues), false);
 
                 return isset($links[$selected_index]) ? $links[$selected_index] : $links[0];
             }
@@ -241,7 +250,7 @@ function devdredi_pick_link(array $links, $mode='sequential', $visitor_key='', $
             
             $used_indices[] = $selected_index;
             $user_random_used[$visitor_key] = $used_indices;
-            update_option('devdredi_user_random_used', $user_random_used, false);
+            update_option('devdredi_user_random_used', devdredi_rotation_cap($user_random_used), false);
             
             return $links[$selected_index];
 
@@ -261,7 +270,7 @@ function devdredi_pick_link(array $links, $mode='sequential', $visitor_key='', $
             
             $selected_link = $links[$user_seq_idx];
             $user_seq_counters[$visitor_key] = $user_seq_idx + 1;
-            update_option('devdredi_user_seq_counters', $user_seq_counters, false);
+            update_option('devdredi_user_seq_counters', devdredi_rotation_cap($user_seq_counters), false);
             
             return $selected_link;
 
