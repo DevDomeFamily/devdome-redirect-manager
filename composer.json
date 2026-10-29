@@ -1,0 +1,28 @@
+{
+    "name": "devdome/devdome-redirect-manager",
+    "description": "Free WordPress redirect plugin: 301/302/307/308/JavaScript redirects with geo targeting, device targeting, link rotation, scheduling and per-rule statistics. Free alternative to Redirection Pro features, Pretty Links Pro and ThirstyAffiliates Pro.",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "homepage": "https://wordpress.org/plugins/devdome-redirect-manager/",
+    "keywords": [
+        "wordpress",
+        "wordpress-plugin",
+        "redirects",
+        "301-redirect",
+        "geo-targeting"
+    ],
+    "authors": [
+        {
+            "name": "DevDome",
+            "homepage": "https://devdome.com"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/DevDomeFamily/devdome-redirect-manager/issues",
+        "source": "https://github.com/DevDomeFamily/devdome-redirect-manager"
+    },
+    "require": {
+        "php": ">=7.4",
+        "composer/installers": "^1.0 || ^2.0"
+    }
+}
