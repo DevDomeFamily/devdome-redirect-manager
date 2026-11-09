@@ -280,6 +280,9 @@ add_action('admin_init', function () {
     if (!isset($_GET['_rmx']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_rmx'])), 'devdredi_io')) {
         return;
     }
+    if (sanitize_key(wp_unslash($_GET['rm_export'])) === 'csv') {
+        devdredi_export_csv(); // exits
+    }
     global $wpdb;
     $t = $wpdb->prefix . 'devdredi_settings';
     $excluded = devdredi_io_excluded_suffixes();
@@ -308,6 +311,117 @@ add_action('admin_init', function () {
     header('Content-Disposition: attachment; filename="devdome-redirect-manager-' . gmdate('Ymd-His') . '.json"');
     echo wp_json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
     exit;
+});
+
+
+/**
+ * CSV export (1.5.10): one row per rule with name, state, what it redirects, source list, destination list and
+ * method; lists are joined with " | ". A summary for spreadsheets, not a full backup (that is the JSON export).
+ */
+function devdredi_export_csv()
+{
+    $rules = devdredi_get_rules();
+    if (devdredi_rules_index_unreadable()) {
+        wp_die(esc_html__('The rules could not be read (database error); no export was produced. Try again.', 'devdome-redirect-manager'));
+    }
+    $lines = function ($text) { return implode(' | ', array_filter(array_map('trim', explode("\n", (string) $text)))); };
+    $out   = devdredi_csv_line(array('name', 'state', 'what', 'source', 'destination', 'method'));
+    unset($GLOBALS['devdredi_read_failed']);
+    foreach ($rules as $r) {
+        $rid    = (string) $r['id'];
+        $what   = (string) devdredi_ability_rs($rid, 'what_to_redirect', 'entire_website');
+        $source = '';
+        if ($what === 'custom_urls') {
+            $source = $lines(devdredi_ability_rs($rid, 'custom_links_list', ''));
+        } elseif ($what === 'selected_existing') {
+            $source = $lines(devdredi_ability_rs($rid, 'selected_links_list', ''));
+        } elseif ($what === 'referrer') {
+            $source = $lines(devdredi_ability_rs($rid, 'referrer_list', ''));
+        }
+        $mode = (string) devdredi_ability_rs($rid, 'redirect_source', 'provided');
+        if ($mode === 'transit') {
+            $dest = (string) devdredi_ability_rs($rid, 'transit_domain', '');
+        } elseif ($mode === 'found') {
+            $dest = 'found: ' . $lines(devdredi_ability_rs($rid, 'page_links_contains', ''));
+        } else {
+            $dest = $lines(devdredi_ability_rs($rid, 'links_list', ''));
+        }
+        $out .= devdredi_csv_line(array(
+            isset($r['nickname']) ? (string) $r['nickname'] : '',
+            (string) devdredi_ability_rs($rid, 'plugin_state', 'stopped'),
+            $what,
+            $source,
+            $dest,
+            (string) devdredi_ability_rs($rid, 'redirect_type', 'js'),
+        ));
+    }
+    if (!empty($GLOBALS['devdredi_read_failed'])) {
+        wp_die(esc_html__('The rules could not be read (database error); no export was produced. Try again.', 'devdome-redirect-manager'));
+    }
+    nocache_headers();
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="devdome-redirect-manager-' . gmdate('Ymd-His') . '.csv"');
+    echo "\xEF\xBB\xBF" . $out; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- CSV download, every cell quoted by devdredi_csv_line()
+    exit;
+}
+
+// CSV import (1.5.10): ADDS one rule per row (source,destination,method,name), stopped; never touches existing rules.
+// A source already on the site (a custom-URL rule) or earlier in the file is skipped as a duplicate.
+add_action('wp_ajax_devdredi_import_csv', function () {
+    if (!current_user_can('manage_options')) { wp_send_json_error('forbidden', 403); }
+    check_ajax_referer('devdredi_io', '_n');
+    devdredi_db_guard_begin(); // DESIGN.md 24: the handler answers through devdredi_json_success()
+    // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- raw CSV payload; every cell is sanitized below before storage.
+    $raw = (isset($_POST['payload']) && is_string($_POST['payload'])) ? wp_unslash($_POST['payload']) : '';
+    if (strlen($raw) > 2 * MB_IN_BYTES) { wp_send_json_error('the file is larger than 2 MB; not a redirect list'); }
+    $rows = devdredi_csv_rows($raw);
+    if (empty($rows)) { wp_send_json_error('the file has no rows; expected source,destination,method,name'); }
+    if (count($rows) > 2001) { wp_send_json_error('more than 2000 rows; split the file'); }
+    $rules = devdredi_get_rules();
+    if (devdredi_rules_index_unreadable()) { wp_send_json_error('the rule list could not be read (database error); nothing was changed'); }
+    unset($GLOBALS['devdredi_read_failed']);
+    $existing = array();
+    foreach ($rules as $r) {
+        if ((string) devdredi_ability_rs((string) $r['id'], 'what_to_redirect', 'entire_website') === 'custom_urls') {
+            foreach (explode("\n", (string) devdredi_ability_rs((string) $r['id'], 'custom_links_list', '')) as $src) {
+                if (trim($src) !== '') { $existing[] = trim($src); }
+            }
+        }
+    }
+    if (!empty($GLOBALS['devdredi_read_failed'])) { wp_send_json_error('the rules could not be read (database error); nothing was changed'); }
+    $plan = devdredi_csv_import_plan($rows, $existing);
+    $report = array('added' => 0, 'skipped' => count($plan['skipped']), 'invalid' => array_map(function ($i) { return 'line ' . $i['line'] . ': ' . $i['why']; }, $plan['invalid']));
+    if (empty($plan['add'])) {
+        devdredi_json_success($report);
+    }
+    $ids = array_map(function ($r) { return $r['id']; }, $rules);
+    $rules_before = $rules;
+    $new_ids = array();
+    $GLOBALS['devdredi_write_failed'] = false;
+    foreach ($plan['add'] as $row) {
+        $rid = devdredi_new_rule_id($ids);
+        $ids[] = $rid;
+        $new_ids[] = $rid;
+        $rules[] = array('id' => $rid, 'nickname' => sanitize_text_field($row['name']), 'priority' => count($rules) + 1);
+        $ok = devdredi_ability_ws($rid, 'plugin_state', 'stopped');
+        $ok = devdredi_ability_ws($rid, 'start_time', 0) && $ok;
+        $ok = devdredi_ability_ws($rid, 'what_to_redirect', 'custom_urls') && $ok;
+        $ok = devdredi_ability_ws($rid, 'custom_links_list', sanitize_textarea_field($row['source'])) && $ok;
+        $ok = devdredi_ability_ws($rid, 'redirect_source', 'provided') && $ok;
+        $ok = devdredi_ability_ws($rid, 'links_list', $row['destination'] !== '' ? esc_url_raw($row['destination']) : '') && $ok;
+        $ok = devdredi_ability_ws($rid, 'redirect_type', $row['method']) && $ok;
+        if (!$ok) { $GLOBALS['devdredi_write_failed'] = true; break; }
+    }
+    $saved = empty($GLOBALS['devdredi_write_failed']) && devdredi_save_rules($rules);
+    if (!$saved) {
+        devdredi_db_guard_rebase(); // the undo of the failed step is not refused by that failure (DESIGN.md 24)
+        $gone = true;
+        foreach ($new_ids as $rid) { $gone = devdredi_delete_rule_settings($rid) && $gone; }
+        $gone = devdredi_save_rules($rules_before) && $gone;
+        wp_send_json_error($gone ? 'import failed: a database write failed, nothing was changed' : 'import failed: a database write failed AND the half-added rules could not be removed; check the rule list');
+    }
+    $report['added'] = count($plan['add']);
+    devdredi_json_success($report);
 });
 
 // Import (replace-all): wipe this site's rules + config, load the file's rules. Rules arrive stopped
@@ -465,7 +579,7 @@ function devdredi_import_value_problem($key, $value, $raw = null)
     }
     $enums = array(
         'what_to_redirect' => array('entire_website', 'selected_existing', 'custom_urls', 'all_404', 'referrer'),
-        'redirect_type' => array('js', '301', '302', '307', '308', 'meta'), 'redirect_source' => array('provided', 'found', 'transit'),
+        'redirect_type' => array('js', '301', '302', '307', '308', '410', 'meta'), 'redirect_source' => array('provided', 'found', 'transit'),
         'links_mode' => array('sequential', 'random', 'descending', 'skip_domain'), 'open_mode' => array('same_tab', 'new_tab'),
         'run_once' => array('never', 'ip', 'ip_ua'), 'revisit_delay_unit' => array('minutes', 'hours', 'days'),
         'run_mode' => array('unlimited', 'set_time'), 'fallback_mode' => array('leave', 'send'), 'geo_filter_mode' => array('whitelist', 'blacklist'),
@@ -594,6 +708,11 @@ function devdredi_enqueue_assets($hook)
     $css_path = DEVDREDI_DIR . 'assets/devdome-tools-tw.css';
     $ver = file_exists($css_path) ? filemtime($css_path) : DEVDREDI_VERSION;
     wp_enqueue_style('devdredi-tools-ui', DEVDREDI_URL . 'assets/devdome-tools-tw.css', array(), $ver);
+    wp_add_inline_style('devdredi-tools-ui', '.dd-save-btn:hover{background:#4338ca !important;}'
+        . ' .dd-app .dd-list-wrap{overflow-x:auto;border-radius:12px;} .dd-app .dd-list{width:100%;min-width:560px;border-collapse:separate;border-spacing:0;}'
+        . ' .dd-app .dd-list thead th{background:#f9fafb;padding:8px 12px;text-align:left;font-size:12px;line-height:16px;font-weight:500;color:#374151;letter-spacing:.05em;white-space:nowrap;border-bottom:1px solid #e5e7eb;border-right:1px solid #e5e7eb;}'
+        . ' .dd-app .dd-list tbody td{padding:10px 12px;font-size:13px;line-height:18px;color:#374151;vertical-align:middle;border-bottom:1px solid #e5e7eb;border-right:1px solid #e5e7eb;}'
+        . ' .dd-app .dd-list th:last-child,.dd-app .dd-list td:last-child{border-right:0;} .dd-app .dd-list tbody tr:last-child td{border-bottom:0;} .dd-app .dd-list tbody tr:hover td{background:#f8fbff;}'); // was a literal <style> in the footer (zip audit 2026-10-19)
 
     $admin_css = DEVDREDI_DIR . 'assets/admin.css';
     wp_enqueue_style(
@@ -648,6 +767,24 @@ function devdredi_admin_js_capture($print)
     }
 }
 add_action('admin_init', 'devdredi_handle_rule_actions');
+
+/** Remove one automatic redirect (1.5.10): nonce-checked GET from the list, then back to the page (PRG). */
+function devdredi_handle_auto_remove()
+{
+    if (!isset($_GET['rm_auto_remove'], $_GET['page']) || $_GET['page'] !== 'devdome-redirect-manager' || !current_user_can('manage_options')) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- the nonce is checked right below
+        return;
+    }
+    check_admin_referer('devdredi_auto_remove', '_rman');
+    $path = devdredi_auto_norm_path(rawurldecode(sanitize_text_field(wp_unslash($_GET['rm_auto_remove']))));
+    $map  = devdredi_auto_map();
+    if (isset($map[$path])) {
+        unset($map[$path]);
+        update_option('devdredi_auto_redirects', $map, false);
+    }
+    wp_safe_redirect(admin_url('admin.php?page=devdome-redirect-manager'));
+    exit;
+}
+add_action('admin_init', 'devdredi_handle_auto_remove');
 function devdredi_handle_rule_actions()
 {
     if (!current_user_can('manage_options')) {
@@ -938,7 +1075,7 @@ function devdredi_settings_page()
         devdredi_update_setting('outside_only', isset($_POST['outside_only']) ? 1 : 0);
 
         $redirect_type = isset($_POST['redirect_type']) ? sanitize_text_field(wp_unslash($_POST['redirect_type'])) : 'js';
-        if (!in_array($redirect_type, array('301', '302', '307', '308', 'js', 'meta'), true)) {
+        if (!in_array($redirect_type, array('301', '302', '307', '308', '410', 'js', 'meta'), true)) {
             $redirect_type = 'js';
         }
         devdredi_update_setting('redirect_type', $redirect_type);
@@ -979,7 +1116,26 @@ function devdredi_settings_page()
         devdredi_update_setting('selected_links_meta', wp_json_encode($meta_clean));
 
         $custom_list_raw = isset($_POST['custom_links_list']) ? trim(sanitize_textarea_field(wp_unslash($_POST['custom_links_list']))) : '';
-        $custom_array = array_filter(array_map('devdredi_normalize_path', array_map('trim', explode("\n", $custom_list_raw))));
+        // Pattern items (1.5.10: ^regex, * wildcard) are kept as typed when they compile; a plain line is normalised as before.
+        $custom_array = array();
+        $GLOBALS['devdredi_bad_patterns'] = 0;
+        foreach (array_map('trim', explode("\n", $custom_list_raw)) as $custom_line) {
+            if ($custom_line === '') {
+                continue;
+            }
+            if (devdredi_pattern_kind($custom_line) !== 'plain') {
+                if (devdredi_pattern_valid($custom_line) && !preg_match('/\s/', $custom_line)) {
+                    $custom_array[] = $custom_line;
+                } else {
+                    $GLOBALS['devdredi_bad_patterns']++;
+                }
+                continue;
+            }
+            $custom_norm = devdredi_normalize_path($custom_line);
+            if ($custom_norm !== '') {
+                $custom_array[] = $custom_norm;
+            }
+        }
         $custom_links_list = implode("\n", array_unique($custom_array));
         devdredi_update_setting('custom_links_list', $custom_links_list);
 
@@ -1423,11 +1579,11 @@ function devdredi_settings_page()
     $run_time_hours = intdiv($total_minutes, 60) % 24; // intdiv avoids the PHP 8.1 implicit float->int modulo deprecation
     $run_time_mins = $total_minutes % 60;
 
-    $run_weekdays = maybe_unserialize(devdredi_get_setting('run_weekdays', ''));
+    $run_weekdays = devdredi_get_setting('run_weekdays', ''); // review #5: no second unserialize
     if (!is_array($run_weekdays)) {
         $run_weekdays = [];
     }
-    $specific_times = maybe_unserialize(devdredi_get_setting('specific_times', ''));
+    $specific_times = devdredi_get_setting('specific_times', '');
     if (!is_array($specific_times)) {
         $specific_times = [
             ['enable' => 0, 'start' => '00:00', 'end' => '23:59'],
@@ -1474,6 +1630,9 @@ function devdredi_settings_page()
                 <a href="<?php echo esc_url(admin_url('admin.php?page=devdome-redirect-manager&rm_export=1&_rmx=' . wp_create_nonce('devdredi_io'))); ?>" class="dd-io-btn" title="Export settings (download all rules to a file)"><span class="dashicons dashicons-download"></span></a>
                 <button type="button" id="dd-import-btn" class="dd-io-btn" title="Import settings (replace all rules from a file)"><span class="dashicons dashicons-upload"></span></button>
                 <input type="file" id="dd-import-file" accept="application/json,.json" style="display:none;">
+                <a href="<?php echo esc_url(admin_url('admin.php?page=devdome-redirect-manager&rm_export=csv&_rmx=' . wp_create_nonce('devdredi_io'))); ?>" class="dd-io-btn" title="Export CSV (one row per rule: name, state, what, source, destination, method)"><span class="dashicons dashicons-media-spreadsheet"></span></a>
+                <button type="button" id="dd-import-csv-btn" class="dd-io-btn" title="Import CSV (adds one rule per row: source, destination, method, name; duplicates skipped; rules arrive stopped)"><span class="dashicons dashicons-insert"></span></button>
+                <input type="file" id="dd-import-csv-file" accept="text/csv,.csv,.txt" style="display:none;">
                 <a class="rm-bug-btn" href="<?php echo esc_url('https://devdome.com/report-bug?plugin=devdome-redirect-manager&v=' . (defined('DEVDREDI_VERSION') ? DEVDREDI_VERSION : '')); ?>" target="_blank" rel="noopener noreferrer" title="Report a bug" style="width:36px;height:36px;border-radius:50px;border:1px solid #dadce0;background:#fff;display:grid;place-items:center;color:#5f6368;text-decoration:none;margin-left:6px;">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg>
                 </a>
@@ -1499,6 +1658,23 @@ function devdredi_settings_page()
                         if(res&&res.success){ alert('Imported '+((res.data&&res.data.rules)||0)+' rule(s).'); window.location.href=BACK; }
                         else { alert('Import failed: '+((res&&res.data)||'invalid file')); btn.style.opacity=''; }
                     }).catch(function(){ alert('Import failed.'); btn.style.opacity=''; });
+                };
+                rd.readAsText(f);
+            });
+            var cbtn=document.getElementById('dd-import-csv-btn'), cinp=document.getElementById('dd-import-csv-file');
+            if(!cbtn||!cinp) return;
+            cbtn.addEventListener('click',function(){ cinp.value=''; cinp.click(); });
+            cinp.addEventListener('change',function(){
+                var f=cinp.files&&cinp.files[0]; if(!f) return;
+                var rd=new FileReader();
+                rd.onload=function(){
+                    if(!confirm('Import CSV? This ADDS one rule per row (source, destination, method, name). Existing rules are not changed; a source already on the site is skipped. Imported rules arrive stopped.')) return;
+                    var fd=new FormData(); fd.append('action','devdredi_import_csv'); fd.append('_n',NONCE); fd.append('payload',rd.result);
+                    cbtn.style.opacity='.5';
+                    fetch(AJAX,{method:'POST',credentials:'same-origin',body:fd}).then(function(r){return r.json();}).then(function(res){
+                        if(res&&res.success){ var d=res.data||{}; var inv=(d.invalid||[]); alert('Added '+(d.added||0)+' rule(s), skipped '+(d.skipped||0)+' duplicate(s)'+(inv.length?', '+inv.length+' invalid row(s):\n'+inv.slice(0,20).join('\n'):'')+'.'); if(d.added) window.location.href=BACK; else cbtn.style.opacity=''; }
+                        else { alert('Import failed: '+((res&&res.data)||'invalid file')); cbtn.style.opacity=''; }
+                    }).catch(function(){ alert('Import failed.'); cbtn.style.opacity=''; });
                 };
                 rd.readAsText(f);
             });
@@ -1573,6 +1749,37 @@ function devdredi_settings_page()
                     <a class="dd-rule-add" id="dd-rule-add" href="<?php echo esc_url($rm_base . '&rm_rule_action=add&_rmn=' . $rm_nonce); ?>"><span class="dashicons dashicons-plus-alt2" style="font-size:16px;width:16px;height:16px;line-height:16px;"></span> Add Rule</a>
                 </div>
             </section>
+            <?php $devdredi_auto = devdredi_auto_map(); if ($devdredi_auto) : ?>
+            <section>
+                <div class="dd-sec-head">
+                    <span class="dashicons dashicons-migrate dd-ico"></span>
+                    <h2 class="dd-h2">Automatic Redirects</h2>
+                    <span class="dd-tip"><span class="dashicons dashicons-info-outline"></span><span class="dd-tip-box">When a published post or page gets a new address, or is moved to the trash, its old address is answered with a 301 to the new place (the parent page, the first category or the home page for a trashed item). Only an address that would otherwise be a 404 is redirected. Remove an entry to stop that redirect.</span></span>
+                </div>
+                <div class="dd-card" style="padding:0;">
+                    <div class="dd-list-wrap">
+                        <table class="dd-list">
+                            <thead><tr><th scope="col">Old Address</th><th scope="col">Goes To</th><th scope="col">Why</th><th scope="col">Since</th><th scope="col"></th></tr></thead>
+                            <tbody>
+                            <?php foreach ($devdredi_auto as $devdredi_auto_path => $devdredi_auto_e) :
+                                if (!is_array($devdredi_auto_e)) { continue; }
+                                $devdredi_auto_to = isset($devdredi_auto_e['kind']) && $devdredi_auto_e['kind'] === 'post' ? (string) get_permalink((int) $devdredi_auto_e['to']) : (string) (isset($devdredi_auto_e['to']) ? $devdredi_auto_e['to'] : '');
+                                $devdredi_auto_rm = wp_nonce_url(add_query_arg(array('page' => 'devdome-redirect-manager', 'rm_auto_remove' => rawurlencode($devdredi_auto_path)), admin_url('admin.php')), 'devdredi_auto_remove', '_rman');
+                                ?>
+                                <tr>
+                                    <td><code><?php echo esc_html($devdredi_auto_path); ?></code><?php if (!empty($devdredi_auto_e['title'])) : ?><br><span class="dd-hint" style="margin:0;"><?php echo esc_html($devdredi_auto_e['title']); ?></span><?php endif; ?></td>
+                                    <td><?php echo $devdredi_auto_to !== '' ? '<a href="' . esc_url($devdredi_auto_to) . '" target="_blank" rel="noopener noreferrer">' . esc_html((string) wp_parse_url($devdredi_auto_to, PHP_URL_PATH)) . '</a>' : esc_html__('(not published)', 'devdome-redirect-manager'); ?></td>
+                                    <td><?php echo esc_html(isset($devdredi_auto_e['why']) && $devdredi_auto_e['why'] === 'trash' ? __('Moved to the trash', 'devdome-redirect-manager') : __('Address changed', 'devdome-redirect-manager')); ?></td>
+                                    <td><?php echo !empty($devdredi_auto_e['at']) ? esc_html(sprintf(/* translators: %s: time difference */ __('%s ago', 'devdome-redirect-manager'), human_time_diff((int) $devdredi_auto_e['at'], time()))) : ''; ?></td>
+                                    <td style="text-align:right;white-space:nowrap;"><a class="dd-removeall-btn" href="<?php echo esc_url($devdredi_auto_rm); ?>">Remove</a></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+            <?php endif; ?>
             <?php devdredi_admin_js_capture(function () { ?>
             (function(){
                 var list = document.getElementById('dd-rule-list');
@@ -1799,6 +2006,7 @@ function devdredi_settings_page()
                 var isLink = function (l) {
                     l = l.trim();
                     if (l === '' || /\s/.test(l)) return false;          // no blanks, no spaces
+                    if (/^\^/.test(l) || l.indexOf('*') !== -1) return true;                // a pattern (1.5.10): ^regex or * wildcard
                     return /^\//.test(l) || /^https?:\/\//i.test(l) || /^[^\/]+\.[^\/]/.test(l); // path, URL, or domain
                 };
                 window.ddIsLink = isLink; // shared with the legacy Destination/Selected counter below
@@ -1836,6 +2044,7 @@ function devdredi_settings_page()
                     var cuNormalize = function (raw) {
                         var v = (raw || '').trim();
                         if (v === '' || /\s/.test(v)) return '';
+                        if (/^\^/.test(v) || v.indexOf('*') !== -1) return v;                 // a pattern stays as typed (1.5.10)
                         v = v.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/^\/\//, '').replace(/^www\./i, '');
                         if (/^[^\/]*\.[^\/]*\//.test(v) || /^[^\/]*\.[^\/]+$/.test(v)) {
                             var s = v.indexOf('/'); v = (s === -1) ? '' : v.slice(s);
@@ -2521,7 +2730,10 @@ function devdredi_settings_page()
                                 <button type="button" id="dd-custom-add">Add</button>
                             </div>
                             <small id="devdredi-custom-count" style="display:block;margin-top:8px;"><span id="dd-custom-count">0</span> link(s) entered</small>
-                            <p class="dd-hint">A path ending with / also covers everything under it: /blog/ redirects /blog/ and every /blog/... page. Without the slash only that exact path redirects.</p>
+                            <?php if (!empty($GLOBALS['devdredi_bad_patterns'])) : ?><p class="dd-hint" style="color:#b91c1c;font-weight:600;"><?php
+                            /* translators: %d: number of custom URL patterns that were not valid regular expressions. */
+                            echo esc_html(sprintf(_n('%d pattern was not a valid regular expression and was not saved.', '%d patterns were not valid regular expressions and were not saved.', (int) $GLOBALS['devdredi_bad_patterns'], 'devdome-redirect-manager'), (int) $GLOBALS['devdredi_bad_patterns'])); ?></p><?php endif; ?>
+                            <p class="dd-hint">A path ending with / also covers everything under it: /blog/ redirects /blog/ and every /blog/... page. Without the slash only that exact path redirects. Patterns: start a line with ^ for a regular expression (matched against the path and query, for example ^/blog/(\d+)$), or use * as a wildcard (/docs/*). In a Provided Link, $1 inserts what the first group or * matched.</p>
                             <div id="dd-custom-selected" style="margin-top:10px;"></div>
                             <div class="dd-removeall" id="dd-custom-removeall" style="display:none;">
                                 <button type="button" class="dd-removeall-btn" data-act="ask">Remove All</button>
@@ -2541,6 +2753,7 @@ function devdredi_settings_page()
                             '302'  => '302 Temporary Redirect',
                             '307'  => '307 Temporary Redirect',
                             '308'  => '308 Permanent Redirect',
+                            '410'  => '410 Gone (page removed)',
                             'meta' => 'Meta Refresh Redirect',
                         );
                         $rt = isset($rt_labels[$redirect_type]) ? $redirect_type : 'js';
@@ -2560,6 +2773,7 @@ function devdredi_settings_page()
                                 <div class="dd-dd-group">Advanced</div>
                                 <div class="dd-dd-opt<?php echo esc_attr( $rt_sel('307') ); ?>" data-value="307">307 Temporary Redirect</div>
                                 <div class="dd-dd-opt<?php echo esc_attr( $rt_sel('308') ); ?>" data-value="308">308 Permanent Redirect</div>
+                                <div class="dd-dd-opt<?php echo esc_attr( $rt_sel('410') ); ?>" data-value="410">410 Gone (page removed)</div>
                                 <div class="dd-dd-opt<?php echo esc_attr( $rt_sel('meta') ); ?>" data-value="meta">Meta Refresh Redirect</div>
                             </div>
                         </div>
@@ -3854,7 +4068,6 @@ function devdredi_settings_page()
                         <button type="submit" name="devdredi_run" id="devdredi-main-button" class="dd-btn-primary" value="1">Save &amp; Run Rule #<?php echo (int) $rm_active_pos; ?></button>
                     <?php endif; ?>
                     <button type="submit" name="devdredi_save" class="dd-save-btn" value="1" style="display:inline-flex;align-items:center;justify-content:center;gap:8px;background:#4f46e5;color:#fff;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:600;border:0;cursor:pointer;box-shadow:0 10px 15px -3px rgba(99,102,241,.3),0 4px 6px -4px rgba(99,102,241,.3);transition:all .15s;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></svg>Save Settings</button>
-                    <style>.dd-save-btn:hover{background:#4338ca !important;}</style>
                     <span id="dd-running-for" class="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold text-gray-500" style="display:none;">Running For: <span id="dd-running-for-val" class="text-indigo-600">—</span></span>
                     <?php if ($is_running): ?>
                         <span id="devdredi-timer-container" class="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold text-gray-500">Time Left:

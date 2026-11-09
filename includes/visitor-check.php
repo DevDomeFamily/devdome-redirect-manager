@@ -48,7 +48,7 @@ function devdredi_visitor_check_active()
     if ((string) devdredi_get_setting('redirect_source', 'provided') === 'found') {
         return false;
     }
-    return !in_array((string) devdredi_get_setting('redirect_type', 'js'), array('301', '302', '307', '308', 'meta'), true);
+    return !in_array((string) devdredi_get_setting('redirect_type', 'js'), array('301', '302', '307', '308', '410', 'meta'), true);
 }
 
 /** Keyed digest of the visitor's IP address and browser: what a pass is bound to. Never stored raw. */

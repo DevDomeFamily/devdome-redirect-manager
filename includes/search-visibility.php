@@ -55,6 +55,9 @@ function devdredi_search_disallow_lines()
             continue;
         }
         foreach (array_filter(array_map('trim', explode("\n", $raw))) as $item) {
+            if (function_exists('devdredi_pattern_kind') && devdredi_pattern_kind($item) !== 'plain') {
+                continue; // a regex or wildcard item (1.5.10) is not one address; robots.txt lists addresses only
+            }
             $line = devdredi_search_disallow_line($item);
             if ($line !== '') {
                 $lines[$line] = true;

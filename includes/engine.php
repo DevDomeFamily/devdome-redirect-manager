@@ -127,7 +127,7 @@ function devdredi_is_in_schedule() {
         return false;
     }
 
-    $run_weekdays = maybe_unserialize(devdredi_get_setting('run_weekdays', []));
+    $run_weekdays = devdredi_get_setting('run_weekdays', []); // review #5: the setting reader already unserialized it with allowed_classes=false
     if (is_array($run_weekdays) && count($run_weekdays) > 0) {
         $current_day = $p['N'];
         if (!in_array($current_day, $run_weekdays)) {
@@ -135,7 +135,7 @@ function devdredi_is_in_schedule() {
         }
     }
 
-    $specific_times = maybe_unserialize(devdredi_get_setting('specific_times', []));
+    $specific_times = devdredi_get_setting('specific_times', []);
     if (is_array($specific_times) && !empty($specific_times)) {
         $current_h = $p['H'];
         $current_m = $p['i'];
@@ -452,6 +452,16 @@ function devdredi_check_url_match($pattern, $current_full_url, $current_path, $c
     if (empty($pattern)) return false;
     $item = trim($pattern);
     if ($item === "") return false;
+
+    // Pattern items (1.5.10): ^regex or a * wildcard, matched by includes/patterns.php; the groups ride to the Provided Link.
+    if (devdredi_pattern_kind($item) !== 'plain') {
+        $groups = devdredi_pattern_match($item, (string) (wp_parse_url($current_full_url, PHP_URL_PATH) ?: $current_path), (string) wp_parse_url($current_full_url, PHP_URL_QUERY));
+        if ($groups !== false) {
+            $GLOBALS['devdredi_pattern_groups'] = $groups;
+            return true;
+        }
+        return false;
+    }
 
     // Plain permalinks put every page on the site root with a query (/?cat=5, /?page_id=2). Such an address matches only
     // a request carrying the same query values; by its path alone it would match every page of the site (1.5.0).
@@ -1146,13 +1156,22 @@ add_action('template_redirect', function(){
         // Include the running rule id: reset_count can match across rules, so without it two rules
         // would share one Nth-visitor eligibility transient and contaminate each other's counting.
         $rule_scope = (string) (isset($GLOBALS['devdredi_rule']) ? $GLOBALS['devdredi_rule'] : '');
-        $assign_key = 'devdredi_nth_' . $rule_scope . '_' . $reset_count . '_' . $visitor_hash . '_' . $open_on_every;
-        $eligible = get_transient($assign_key);
+        // Security review 2026-10-19 (#3): one capped map per rule, not a one-year transient per visitor
+        // (two wp_options rows each; a client rotating its user agent minted rows without limit). The map
+        // keeps the newest 2,000 visitor hashes for 30 days; a hash that aged out is simply assigned again.
+        $map_key  = 'devdredi_nth_' . $rule_scope . '_' . $reset_count . '_' . $open_on_every;
+        $map      = get_transient($map_key);
+        $map      = is_array($map) ? $map : array();
+        $eligible = isset($map[$visitor_hash]) ? (int) $map[$visitor_hash] : false;
         if ($eligible === false) {
             $unique_counter = (int) devdredi_get_setting('unique_visitor_count', 0) + 1;
             devdredi_update_setting('unique_visitor_count', $unique_counter);
             $eligible = ($unique_counter % $open_on_every === 0) ? 1 : 0;
-            set_transient($assign_key, $eligible, YEAR_IN_SECONDS);
+            if (count($map) >= 2000) {
+                $map = array_slice($map, -1000, null, true); // keep the newest half
+            }
+            $map[$visitor_hash] = $eligible;
+            set_transient($map_key, $map, 30 * DAY_IN_SECONDS);
         }
         if ((int) $eligible !== 1) {
             devdredi_track_visit($current_full_url);
@@ -1253,8 +1272,13 @@ add_action('template_redirect', function(){
 
     $found_mode = false;
     $target = '';
+    // 410 Gone (1.5.10): the answer is the status itself, so there is no destination to resolve and an empty
+    // destination list is not a reason to fall back.
+    $gone_410 = ((string) devdredi_get_setting('redirect_type', 'js') === '410');
 
-    if ($redirect_source === 'transit') {
+    if ($gone_410) {
+        $target = '';
+    } elseif ($redirect_source === 'transit') {
         // Transit: keep the visitor's path, send it to the same path on another domain.
         // e.g. yoursite.com/post/123?x=1 -> otherdomain.com/post/123?x=1
         $transit_domain = trim((string) devdredi_get_setting('transit_domain', ''));
@@ -1317,6 +1341,10 @@ add_action('template_redirect', function(){
             return;
         }
 
+        // A pattern item carries what it matched into the link ($1 .. $9), 1.5.10.
+        if (!empty($GLOBALS['devdredi_pattern_groups'])) {
+            $link_to_open = devdredi_pattern_apply($link_to_open, $GLOBALS['devdredi_pattern_groups']);
+        }
         $target = devdredi_resolve_redirect_target($link_to_open);
         if (empty($target)) {
             devdredi_track_visit($current_full_url);
@@ -1393,7 +1421,7 @@ add_action('template_redirect', function(){
         devdredi_enqueue_head_js('window.__ddTrackerLoaded = 1;');
     }
 
-    if (in_array($redirect_type, array('301', '302', '307', '308', 'meta'), true)) {
+    if (in_array($redirect_type, array('301', '302', '307', '308', '410', 'meta'), true)) {
         $original_referer = sanitize_text_field( wp_unslash( $_SERVER['HTTP_REFERER'] ?? '' ) );
         $_SERVER['HTTP_REFERER'] = $current_full_url;
 
@@ -1442,6 +1470,14 @@ add_action('template_redirect', function(){
         // Drop the inbound referrer so it can't ride this hop to the next site in the chain — a
         // redirect must never leak where the visitor came from (e.g. reddit) to its destination.
         if (!headers_sent()) { header('Referrer-Policy: no-referrer'); }
+
+        if ($redirect_type === '410') {
+            // The address is gone for good: a 410 answer, no Location header, nothing cached (nocache_headers() above).
+            status_header(410);
+            header('Content-Type: text/html; charset=utf-8');
+            echo '<!DOCTYPE html><html><head><meta charset="utf-8"><title>410 Gone</title><meta name="robots" content="noindex"></head><body style="font-family:sans-serif;text-align:center;padding-top:50px;"><h1>410 Gone</h1><p>' . esc_html__('This page has been removed permanently.', 'devdome-redirect-manager') . '</p></body></html>';
+            exit;
+        }
 
         if ($redirect_type === 'meta') {
             $page_title = devdredi_get_current_page_title();

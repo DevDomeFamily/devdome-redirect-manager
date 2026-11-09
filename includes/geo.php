@@ -25,7 +25,16 @@ function devdredi_get_country_by_ip($ip)
         return false;
     }
 
-    $cache_key = 'devdredi_cc2_' . md5($ip); // cc2: the /resolve-era keys cached a miss for every IP, they must not survive the upgrade (1.5.3)
+    // Security review 2026-10-19 (#4): an IPv6 visitor is cached on its /64 (one household, one lookup), so a
+    // client rotating addresses inside one prefix cannot mint a lookup (and two option rows) per address.
+    $cache_ip = $ip;
+    if (false !== filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+        $packed = @inet_pton($ip);
+        if (false !== $packed && 16 === strlen($packed)) {
+            $cache_ip = inet_ntop(substr($packed, 0, 8) . str_repeat("\0", 8)) . '/64';
+        }
+    }
+    $cache_key = 'devdredi_cc2_' . md5($cache_ip); // cc2: the /resolve-era keys cached a miss for every IP, they must not survive the upgrade (1.5.3)
     $cached = get_transient($cache_key);
     if ($cached !== false) {
         return $cached === '0' ? false : $cached;
@@ -34,12 +43,26 @@ function devdredi_get_country_by_ip($ip)
     if (get_transient('devdredi_geo_error')) {
         return false; // the service failed within the last 5 minutes: no repeated 5-second waits per visitor
     }
+    // Global budget (#4): at most 60 live lookups a minute per site; past it a visitor is "Unknown" until the
+    // minute turns, so an address-rotating client cannot tie up PHP workers on 5-second calls.
+    $budget_key = 'devdredi_geo_budget';
+    $minute     = (int) floor(time() / 60);
+    $b          = get_transient($budget_key);
+    if (!is_array($b) || !isset($b['m'], $b['n']) || (int) $b['m'] !== $minute) {
+        $b = array('m' => $minute, 'n' => 0);
+    }
+    if ((int) $b['n'] >= 60) {
+        return false;
+    }
+    $b['n'] = (int) $b['n'] + 1;
+    set_transient($budget_key, $b, 120);
 
     // /classify answers IP -> country for any caller (1.5.3). The /resolve endpoint used before is the
     // Affiliate Manager's store-routing call and answers country null without a connected account, which
     // silently turned every country rule into "redirect nobody".
+    $started = microtime(true);
     $resp = wp_remote_post(DEVDREDI_GEO_ENDPOINT . '/classify', array(
-        'timeout' => 5,
+        'timeout' => 3, // review #4: 5 s per visitor was the amplification; 3 s, and a slow answer backs off below
         'headers' => array('Content-Type' => 'application/json'),
         'body'    => wp_json_encode(array('ips' => array($ip))),
     ));
@@ -47,6 +70,9 @@ function devdredi_get_country_by_ip($ip)
     if (is_wp_error($resp)) {
         set_transient('devdredi_geo_error', 1, 5 * MINUTE_IN_SECONDS);
         return false;
+    }
+    if ((microtime(true) - $started) > 2.0) {
+        set_transient('devdredi_geo_error', 1, MINUTE_IN_SECONDS); // a slow answer backs off like an error (#4), for one minute
     }
 
     $data = json_decode(wp_remote_retrieve_body($resp), true);

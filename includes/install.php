@@ -7,8 +7,12 @@
 
 defined('ABSPATH') || exit;
 
-function devdredi_activate()
+function devdredi_activate($network_wide = false)
 {
+    // First activation only: the next admin page load opens this plugin's screen (never network-wide, never WP-CLI).
+    if (empty($network_wide) && !(defined('WP_CLI') && WP_CLI)) {
+        set_transient('devdredi_activation_redirect', 1, 60);
+    }
     global $wpdb;
 
     $table_name = $wpdb->prefix . 'devdredi_settings';

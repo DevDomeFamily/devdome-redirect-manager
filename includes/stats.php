@@ -190,11 +190,17 @@ function devdredi_track_visit($link_label, $outgoing_url = null, $status_code = 
     // Prefer the shared-suite beacon's session cookie as the visitor identity when present —
     // a far more accurate unique-visitor signal than the raw IP (distinguishes shared-IP
     // visitors, dedupes one person across changing IPs). Falls back to the IP with no beacon.
-    if (!empty($_COOKIE['ddc_sid'])) {
-        $sid = preg_replace('/[^a-f0-9]/', '', sanitize_text_field(wp_unslash($_COOKIE['ddc_sid'])));
-        if (strlen($sid) >= 8) { $ip = 'sid:' . $sid; }
+    // Security review 2026-10-19 #1: the cookie is accepted only in the beacon's own shape (16-64 hex), and
+    // every identity below is stored as a fixed 32-hex digest, never the raw address, cookie or user agent:
+    // a visitor could otherwise grow the 20,000-entry lists with kilobyte-long values that every public page
+    // view reads and rewrites. The lists are only ever counted, so a digest serves them the same.
+    if (!empty($_COOKIE['ddc_sid']) && is_string($_COOKIE['ddc_sid'])) {
+        $sid = (string) wp_unslash($_COOKIE['ddc_sid']);
+        if (preg_match('/^[a-f0-9]{16,64}$/', $sid)) { $ip = 'sid:' . $sid; }
     }
+    $ip  = ($ip !== '') ? substr(hash('sha256', $ip), 0, 32) : '';
     $ua  = sanitize_text_field($user_agent);
+    $ua  = ($ua !== '') ? substr(hash('sha256', $ua), 0, 32) : '';
     $cap = 20000;
 
     if ($ip !== '') {
@@ -320,7 +326,14 @@ add_action('init', function(){
     if (isset($_GET['devdredi_r']) && $_GET['devdredi_r'] == '1') {
         // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- base64 payload; validated + each field sanitized after decode.
         // Every parameter is a string or nothing: an array (p[]=x) must never reach strtr()/sanitize (a public 500 on PHP 8).
-        $gs = function ($k) { return (isset($_GET[$k]) && is_string($_GET[$k])) ? wp_unslash($_GET[$k]) : ''; };
+        $gs = function ($k) { return (isset($_GET[$k]) && is_string($_GET[$k])) ? substr(wp_unslash($_GET[$k]), 0, 2048) : ''; };
+        // Security review 2026-10-19 #2: at most 60 counter pixels per address per 10 minutes; past that the
+        // pixel answers 204 and counts nothing (a client cannot mint thousands of counter rows).
+        $lim_ip  = function_exists('devdredi_get_client_ip') ? (string) devdredi_get_client_ip() : sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'] ?? ''));
+        $lim_key = 'devdredi_px_' . md5($lim_ip);
+        $lim_n   = (int) get_transient($lim_key);
+        if ($lim_n >= 60) { status_header(204); exit; }
+        set_transient($lim_key, $lim_n + 1, 10 * MINUTE_IN_SECONDS);
         $payload = $gs('p');
         $label = sanitize_text_field($gs('link_label'));
         $out   = sanitize_text_field($gs('outgoing_url'));
@@ -368,8 +381,13 @@ add_action('init', function(){
         if ($label !== '' && $out !== '' && strpos($out, '/wp-admin/') === false) {
             $host = wp_parse_url($out, PHP_URL_HOST);
             $scheme = wp_parse_url($out, PHP_URL_SCHEME);
-            if ($host && in_array($scheme, array('http','https'), true)) {
-                devdredi_count_js_redirect($label, $out, $rid, $ref, $is_slc, $is_404, isset($data['fp']) ? sanitize_text_field((string) $data['fp']) : '');
+            // Security review 2026-10-19 #2: a redirect is counted only to a destination the rule itself can
+            // send visitors to (its links list, fallback and custom domains); any other destination is a forged
+            // pixel and is counted nowhere. Keys are capped so the per-dimension lists cannot be bloated.
+            $dest_host = $host ? preg_replace('#^www\.#i', '', strtolower((string) $host)) : '';
+            $dest_ok   = ($dest_host !== '') && function_exists('devdredi_allowed_redirect_hosts') && in_array($dest_host, devdredi_allowed_redirect_hosts(), true);
+            if ($host && $dest_ok && in_array($scheme, array('http','https'), true)) {
+                devdredi_count_js_redirect(substr($label, 0, 255), substr($out, 0, 255), $rid, substr($ref, 0, 255), $is_slc, $is_404, isset($data['fp']) ? substr(sanitize_text_field((string) $data['fp']), 0, 255) : '');
                 status_header(204);
                 exit;
             }

@@ -3,7 +3,7 @@
 Plugin Name: DevDome Redirect Manager
 Plugin URI: https://devdome.com/wp-plugins/redirect-manager/
 Description: Manage redirects and rotate outgoing links with geo, device and schedule targeting. Part of the DevDome suite.
-Version: 1.5.9
+Version: 1.5.10
 Author: DevDome
 Author URI: https://devdome.com
 Requires at least: 5.6
@@ -23,7 +23,7 @@ if (file_exists(__DIR__ . '/wporg-build.php')) {
     require __DIR__ . '/wporg-build.php';
 }
 
-define('DEVDREDI_VERSION', '1.5.9');
+define('DEVDREDI_VERSION', '1.5.10');
 define('DEVDREDI_DIR', plugin_dir_path(__FILE__));
 define('DEVDREDI_URL', plugin_dir_url(__FILE__));
 
@@ -45,6 +45,7 @@ if (file_exists(DEVDREDI_DIR . 'includes/migrate.php')) {
 require_once DEVDREDI_DIR . 'includes/db-guard.php';
 add_filter('query', 'devdredi_db_guard_record', 1); // DESIGN.md 24: every failed query is recorded before wpdb clears it
 require_once DEVDREDI_DIR . 'includes/settings.php';
+require_once DEVDREDI_DIR . 'includes/csv.php';
 require_once DEVDREDI_DIR . 'includes/helpers.php';
 require_once DEVDREDI_DIR . 'includes/proxy.php';
 require_once DEVDREDI_DIR . 'includes/bots.php';
@@ -54,7 +55,9 @@ require_once DEVDREDI_DIR . 'includes/daily-limit.php';
 require_once DEVDREDI_DIR . 'includes/geo.php';
 require_once DEVDREDI_DIR . 'includes/search.php';
 require_once DEVDREDI_DIR . 'includes/stats.php';
+require_once DEVDREDI_DIR . 'includes/patterns.php';
 require_once DEVDREDI_DIR . 'includes/engine.php';
+require_once DEVDREDI_DIR . 'includes/auto-redirects.php';
 require_once DEVDREDI_DIR . 'includes/search-visibility.php';
 require_once DEVDREDI_DIR . 'includes/analytics-report.php';
 require_once DEVDREDI_DIR . 'includes/install.php';
@@ -125,6 +128,21 @@ add_filter('devdcorev1_suite_report_sections', function ($s) {
     return $s;
 });
 
+// First activation (install.php sets the transient): open this plugin's screen once, the DevDome Account card
+// when the site is not linked yet. Bulk activation, AJAX, cron and WP-CLI never redirect.
+add_action('admin_init', function () {
+    if (!get_transient('devdredi_activation_redirect')) {
+        return;
+    }
+    delete_transient('devdredi_activation_redirect');
+    // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only: a bulk activation never redirects.
+    if (isset($_GET['activate-multi']) || wp_doing_ajax() || wp_doing_cron() || (defined('WP_CLI') && WP_CLI) || !current_user_can('activate_plugins')) {
+        return;
+    }
+    $connected = function_exists('devdcorev1_account_is_connected') && devdcorev1_account_is_connected();
+    wp_safe_redirect($connected ? admin_url('admin.php?page=' . 'devdome-redirect-manager') : admin_url('admin.php?page=' . (defined('DEVDCOREV1_TOOLS_MENU_SLUG') ? DEVDCOREV1_TOOLS_MENU_SLUG : 'devdcorev1-tools')));
+    exit;
+});
 register_activation_hook(__FILE__, 'devdredi_activate');
 register_deactivation_hook(__FILE__, 'devdredi_deactivate');
 

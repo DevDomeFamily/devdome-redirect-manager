@@ -4,7 +4,7 @@ Tags: url rotator, link rotator, geo redirect, geotargeting, device redirect
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.5.9
+Stable tag: 1.5.10
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -13,6 +13,8 @@ Set up 301 and 302 redirects, URL rotation, geo redirect and device redirect rul
 == Description ==
 
 DevDome Redirect Manager handles URL redirect rules for your entire site, selected content, custom paths or 404 pages. Use a 302 redirect for temporary forwarding or a 301 redirect for permanent redirection, with separate schedules and statistics for each rule. Configure everything from one screen without coding; all features are free, with unlimited rules and no paid tier.
+
+Rules can also match by pattern: a regular expression or a wildcard moves a whole section of a site with one rule, and the matched part can be carried into the destination. Changed and trashed addresses are redirected automatically.
 
 Use the link rotator to send visitors through a list of destination URLs in order, randomly or with weighted distribution. The URL rotator can split traffic between destinations for basic split testing. For domain forwarding, send visitors to the same path on another domain while preserving the query string.
 
@@ -40,7 +42,7 @@ For a homepage redirect, target the homepage through Selected existing URLs. For
 
 = Redirect Method and URL forwarding =
 
-Choose **JavaScript Redirect**, **301 Permanent**, **302 Temporary**, **307 Temporary**, **308 Permanent** or **Meta Refresh** per rule: a 301 redirect for permanent redirection, a 302 redirect for temporary URL forwarding. New-tab opening and client-side delays need JavaScript; server and meta methods open in the same tab.
+Choose **JavaScript Redirect**, **301 Permanent**, **302 Temporary**, **307 Temporary**, **308 Permanent**, **410 Gone** or **Meta Refresh** per rule: a 301 redirect for permanent redirection, a 302 redirect for temporary URL forwarding. New-tab opening and client-side delays need JavaScript; server and meta methods open in the same tab.
 
 Under **Where To Send Traffic**, choose:
 
@@ -120,7 +122,7 @@ Add, duplicate, delete, start and stop rules independently; each has a nickname 
 * **Save & Run** starts a rule; **Stop** stops it. Live status shows Running/Stopped, run time and time left.
 * **Save Settings** saves without changing run state. **Return to Default** resets the current rule.
 * **Reset Stats** clears the current rule's statistics and rotation position, not today's daily-limit count.
-* **Export** downloads every rule as JSON, without statistics or run state. **Import** replaces every rule on the site; imported rules arrive stopped.
+* **Export** downloads every rule as JSON, without statistics or run state. **Import** replaces every rule on the site; imported rules arrive stopped. **Export CSV** downloads one row per rule (name, state, what, source, destination, method); **Import CSV** adds one custom-URL rule per row (source, destination, method, name), skips sources already on the site and leaves existing rules alone.
 
 Each rule records visitors, page views, unique users, unique IPs, redirects, bypassed visitors, device and country counts and source/destination breakdowns, with a time-range filter; this link tracking covers rule activity, not arrival at a destination.
 
@@ -145,7 +147,7 @@ No account is required for the redirect features. The geo filter is optional and
 
 = Does the redirect work without JavaScript, and why is "New Tab" greyed out or reverting to "Same Tab"? =
 
-Choose 301, 302, 307, 308 or Meta Refresh to redirect without JavaScript. These methods always open in the same tab, so New Tab is unavailable.
+Choose 301, 302, 307, 308 or Meta Refresh to redirect without JavaScript. These methods always open in the same tab, so New Tab is unavailable. 410 Gone answers that the address was removed for good instead of redirecting; it needs no destination.
 
 JavaScript is required for Visitor Check, new-tab opening, "wait for a click" and client-side delays. On fully cached pages, Referring websites and Only visitors arriving from outside rules also use JavaScript to detect the landing.
 
@@ -195,7 +197,7 @@ Matching visits stay on the page, never go to the bypass link and are counted wi
 
 = How do I move my rules to another site? =
 
-Use Export to download a JSON file of all rules, then Import on the other site. Imported rules arrive stopped, so you can review them before starting.
+Use Export to download a JSON file of all rules, then Import on the other site. Imported rules arrive stopped, so you can review them before starting. For a plain list of redirects from another plugin or a spreadsheet, use Import CSV: columns source, destination, method (301 by default) and name, one rule per row.
 
 = How do I set up 301 redirects when I change domain, change URL or change permalink? =
 
@@ -213,7 +215,7 @@ New rules start stopped unless requested otherwise. Updates are all or nothing. 
 
 == External services ==
 
-**Error reports (`devdome.com`), only when you press "Report this error" on an error message.** The plugin sends the error text, the plugin, bundled library, WordPress and PHP versions, whether the site is a multisite, the site locale, the screen you were on, your site address, the generated site ID, your DevDome account ID if the site is connected, and your admin e-mail (so support can reply) to `https://devdome.com/api/plugin/error-report`. No redirect rules, visitor data or statistics are included. Nothing is sent unless you press the button.
+**Error reports (`devdome.com`), only when you press "Report this error" on an error message.** The plugin sends the error text, the plugin, bundled library, WordPress and PHP versions, whether the site is a multisite, the site locale, the screen you were on, your site address, the generated site ID, your DevDome account ID if the site is connected, and your admin e-mail (so support can reply) to `https://devdome.com/api/plugin/error-report`. No redirect rules, visitor data or statistics are included. Nothing is sent unless you press the button. DevDome: [Terms of Service](https://devdome.com/terms-of-service), [Privacy Policy](https://devdome.com/privacy-policy).
 
 **Plugin catalog (`devdome.com`).** The DevDome Dashboard in wp-admin fetches the list of DevDome plugins (names, descriptions, logos, links, WordPress.org slugs) from `https://devdome.com/wp-plugins/catalog.json` at most once every 12 hours. Only the bundled core version is sent; no site or visitor data.
 
@@ -260,6 +262,19 @@ Those two build inputs are not included in the distributed package. Ask for them
 5. Scheduling: run a redirect rule between dates and times in your timezone.
 
 == Changelog ==
+
+= 1.5.10 =
+
+* New redirect method 410 Gone: the rule answers that the address was removed for good instead of redirecting, with no destination needed; also available to agents (method: 410).
+* CSV export (one row per rule: name, state, what, source, destination, method) and CSV import, which adds one custom-URL rule per row (source, destination, method, name), skips sources already on the site and leaves existing rules unchanged; imported rules arrive stopped.
+* Shared DevDome library 1.7.17: the connect beacon's flood guard counts an IPv6 visitor per /64 network, and the one-click install of another DevDome plugin verifies the downloaded package against the published checksum before installing.
+* Hardening (security review): the "every Nth visitor" bookkeeping keeps one capped list per rule instead of a year-long record per visitor; country lookups are cached per IPv6 /64, limited to 60 live lookups a minute and back off after a slow answer; schedule settings are no longer unserialized a second time.
+* Pattern rules: a Custom URL starting with ^ is a regular expression (matched against the path and query), one containing * is a wildcard, and $1 to $9 in a Provided Link reuse what the pattern matched, so one rule can move a whole section of a site. A pattern that does not compile is not saved and the screen says so.
+* Automatic redirects: when a published post or page gets a new address, or is moved to the trash, the old address answers with a 301 to the new place (parent page, first category or home for a trashed item). Only an address that would otherwise be a 404 is redirected; the entries are listed on the rules page with a Remove button.
+* The first activation opens the plugin screen once: the DevDome Account card when the site is not connected yet, the Overview when it is. Bulk activations never redirect.
+* Statistics lists store 32-character digests, a session id is accepted only as 16 to 64 hex characters, the tracking pixel counts only the rule's own destinations with a limit of 60 per address per 10 minutes and a cap on stored keys, and the sticky footer hover style is registered through WordPress instead of a style block.
+* The create, update and set-state abilities are marked as changes that cannot be undone, so an AI assistant connected through MCP asks before running them.
+* Shared DevDome library 1.7.16: the connect request to devdome.com stays valid for 60 minutes instead of 20, and the DevDome Tools page asks the server again while a request this site started is still open, so a connection authorized in a tab that never came back still completes; the Tools page notes when DevDome Analytics is not installed; the Analytics note styles are registered through WordPress instead of a style block in the page; one shared helper reads the visitor address behind a trusted proxy; the AI Assistant is listed in the plugin catalog. After connecting, the screen you land on says which account the site is connected to and the one next step.
 
 = 1.5.9 =
 
@@ -362,11 +377,8 @@ Older entries: see changelog.txt in the plugin folder.
 
 == Upgrade Notice ==
 
-= 1.3.3 =
-Suite dashboard and button refresh. Rules and statistics are unaffected.
-
-= 1.3.2 =
-Internal housekeeping release. No functional changes; rules and statistics are unaffected.
+= 1.5.10 =
+Statistics hardening and shared DevDome library 1.7.16. Rules and statistics are unaffected.
 
 = 1.3.1 =
 Housekeeping release: the suite hub no longer installs plugins for you, and unused redirect code paths were removed. Your rules and statistics are unaffected.

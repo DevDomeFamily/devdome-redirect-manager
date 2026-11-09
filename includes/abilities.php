@@ -6,7 +6,7 @@
  * Coverage = every feature of the Redirect Manager screen (audited against admin.php's save
  * handler and engine.php, 2026-09-10):
  *   rules (add, duplicate, rename, reorder, delete, run/stop), what to redirect (entire website,
- *   selected pages, custom paths, every 404), redirect method (301/302/307/308/js/meta),
+ *   selected pages, custom paths, every 404), redirect method (301/302/307/308/410/js/meta),
  *   destination source (provided links, links found on the page, same path on another domain),
  *   rotation (sequential, random, weighted, skip domain, repeat), open mode and delays (js only),
  *   frequency (every visit, once per IP or IP+browser, every Nth visitor, revisit delay),
@@ -100,10 +100,10 @@ function devdredi_ability_rule_spec_properties()
     return array(
         'name'     => array('type' => 'string', 'description' => 'Rule nickname shown in wp-admin.'),
         'what'     => array('type' => 'string', 'enum' => array('entire_website', 'selected_pages', 'custom_paths', 'all_404', 'referring_sites'), 'description' => 'What to redirect: every page of the site, selected existing pages/posts/categories (give their URLs in from), custom paths or URLs (from), every 404 page, or referring_sites = only visitors arriving from the websites in from (a domain like reddit.com covers its subdomains, a word like reddit covers every referring host containing it).'),
-        'from'     => array('type' => 'array', 'items' => array('type' => 'string'), 'description' => 'Source paths or URLs on this site (custom_paths) or existing page URLs (selected_pages). For selected_pages a category URL also covers every post in it and its subcategories, a product category or shop archive URL every product in it. Ignored for entire_website and all_404.'),
+        'from'     => array('type' => 'array', 'items' => array('type' => 'string'), 'description' => 'Source paths or URLs on this site (custom_paths) or existing page URLs (selected_pages). A custom_paths entry starting with ^ is a regular expression matched against the path and query; one containing * is a wildcard; $1..$9 in a link reuse what the groups matched. For selected_pages a category URL also covers every post in it and its subcategories, a product category or shop archive URL every product in it. Ignored for entire_website and all_404.'),
         'outside_only' => array('type' => 'boolean', 'description' => 'entire_website, selected_pages, custom_paths, all_404: true = only a visitor who ARRIVES from outside (another website, or no referrer at all) is redirected; a visitor moving between pages of this site stays. false (default) = every matching visit. referring_sites rules already behave this way.'),
         'referrer_pages' => array('type' => 'array', 'items' => array('type' => 'string'), 'description' => 'what = referring_sites only: redirect those visitors only on these existing category, page or post URLs of this site (the "Only on selected pages" option; a category URL also covers every post in it, a product category or shop archive URL every product in it). An empty array redirects them on every page.'),
-        'method'   => array('type' => 'string', 'enum' => array('301', '302', '307', '308', 'js', 'meta'), 'description' => 'Redirect method. Server methods (301/302/307/308) and meta always open in the same tab.'),
+        'method'   => array('type' => 'string', 'enum' => array('301', '302', '307', '308', '410', 'js', 'meta'), 'description' => 'Redirect method. Server methods (301/302/307/308) and meta always open in the same tab. 410 answers "410 Gone" instead of redirecting (the address was removed for good), so to is not needed.'),
         'destination_mode' => array('type' => 'string', 'enum' => array('provided', 'found', 'transit'), 'description' => 'provided = send to the URLs in to; found = send to a link or button found on the page whose URL or text contains one of found_link_contains; transit = send to the same path on transit_domain.'),
         'to'       => array('type' => 'array', 'items' => array('type' => 'string'), 'description' => 'Destination URL(s), http or https (destination_mode provided).'),
         'found_link_contains' => array('type' => 'array', 'items' => array('type' => 'string'), 'description' => 'Patterns a link or button on the page must contain (destination_mode found).'),
@@ -282,8 +282,8 @@ function devdredi_ability_format_rule($r, $with_maps = false)
     $rot_map = array('sequential' => 'sequential', 'random' => 'random', 'descending' => 'weighted', 'skip_domain' => 'skip_domain');
     $geo_mode = (string) $rs('geo_filter_mode', 'whitelist');
     $geo_csv  = (string) ($geo_mode === 'blacklist' ? $rs('geo_filter_blacklist', '') : $rs('geo_filter_whitelist', $rs('geo_filter_country_codes', '')));
-    $weekdays = maybe_unserialize($rs('run_weekdays', array()));
-    $times    = maybe_unserialize($rs('specific_times', array()));
+    $weekdays = $rs('run_weekdays', array()); // review #5: already unserialized safely by the reader
+    $times    = $rs('specific_times', array());
     $windows  = array();
     foreach (is_array($times) ? $times : array() as $t) {
         if (is_array($t) && !empty($t['enable'])) {
@@ -503,8 +503,8 @@ function devdredi_ability_apply_spec($rid, $spec, $all)
     // method
     if ($has('method')) {
         $m = (string) $get('method', '301');
-        if (!in_array($m, array('301', '302', '307', '308', 'js', 'meta'), true)) {
-            return new WP_Error('devdredi_bad_input', __('method must be 301, 302, 307, 308, js or meta.', 'devdome-redirect-manager'));
+        if (!in_array($m, array('301', '302', '307', '308', '410', 'js', 'meta'), true)) {
+            return new WP_Error('devdredi_bad_input', __('method must be 301, 302, 307, 308, 410, js or meta.', 'devdome-redirect-manager'));
         }
         $ws('redirect_type', $m);
     }
@@ -921,7 +921,7 @@ function devdredi_register_abilities()
     };
 
     $reg('devdome-redirect-manager/list-redirects', __('List redirect rules', 'devdome-redirect-manager'),
-        __('List every redirect rule on this WordPress site in priority order with its full configuration: running or stopped, what it redirects (entire website, selected pages, custom paths, every 404), source paths, redirect method (301, 302, 307, 308, JavaScript, meta refresh), destination mode and URLs, rotation, open mode and delays, frequency (every visit, once per visitor, every Nth visitor, revisit delay), schedule (timezone, dates, weekdays, time windows, run duration), geo targeting, device targeting, fallback, allowed domains, and totals. Read only.', 'devdome-redirect-manager'),
+        __('List every redirect rule on this WordPress site in priority order with its full configuration: running or stopped, what it redirects (entire website, selected pages, custom paths, every 404), source paths, redirect method (301, 302, 307, 308, 410 Gone, JavaScript, meta refresh), destination mode and URLs, rotation, open mode and delays, frequency (every visit, once per visitor, every Nth visitor, revisit delay), schedule (timezone, dates, weekdays, time windows, run duration), geo targeting, device targeting, fallback, allowed domains, and totals. Read only.', 'devdome-redirect-manager'),
         $empty_input, array('type' => 'object', 'properties' => array('total' => array('type' => 'integer'), 'items' => array('type' => 'array', 'items' => $rule_out_brief))), 'devdredi_ability_list', 'read');
 
     $reg('devdome-redirect-manager/get-redirect-details', __('Get redirect rule details', 'devdome-redirect-manager'),
@@ -951,19 +951,19 @@ function devdredi_register_abilities()
         $empty_input, array('type' => 'object', 'properties' => array('plugin' => array('type' => 'string'), 'version' => array('type' => 'integer'), 'rules' => array('type' => 'array', 'items' => array('type' => 'object', 'properties' => array('id' => array('type' => 'string'), 'nickname' => array('type' => 'string'), 'priority' => array('type' => 'integer')))), 'settings' => array('type' => 'object', 'description' => 'rule__<id>__<key> => stored value.'))), 'devdredi_ability_export', 'read');
 
     $reg('devdome-redirect-manager/create-redirect', __('Create a redirect rule', 'devdome-redirect-manager'),
-        __('Create a new redirect rule on this WordPress site with any of the plugin\'s options: what to redirect (entire website, selected pages, custom paths, every 404) and the source paths, redirect method (301 permanent by default; 302, 307, 308, js, meta), destination mode (provided URLs with rotation, a link found on the page, or the same path on another domain), open mode and delays, frequency (every visit, once per IP or IP+browser, every Nth visitor, revisit delay), schedule (timezone, date range, weekdays, up to 3 time windows, run duration), geo targeting (allow or block countries), device targeting, fallback for non-redirected visitors, allowed custom domains and cache purge. Only from and to are required for a simple path-to-URL redirect. The rule is created STOPPED unless start is true, so nothing changes for visitors until it is started. Never edits or deletes existing rules.', 'devdome-redirect-manager'),
+        __('Create a new redirect rule on this WordPress site with any of the plugin\'s options: what to redirect (entire website, selected pages, custom paths, every 404) and the source paths, redirect method (301 permanent by default; 302, 307, 308, 410 Gone with no destination, js, meta), destination mode (provided URLs with rotation, a link found on the page, or the same path on another domain), open mode and delays, frequency (every visit, once per IP or IP+browser, every Nth visitor, revisit delay), schedule (timezone, date range, weekdays, up to 3 time windows, run duration), geo targeting (allow or block countries), device targeting, fallback for non-redirected visitors, allowed custom domains and cache purge. Only from and to are required for a simple path-to-URL redirect. The rule is created STOPPED unless start is true, so nothing changes for visitors until it is started. Never edits or deletes existing rules.', 'devdome-redirect-manager'),
         array('type' => 'object', 'properties' => array_merge($spec, array('start' => array('type' => 'boolean', 'default' => false, 'description' => 'true = the rule starts redirecting visitors immediately.'))), 'additionalProperties' => false),
-        array('type' => 'object', 'properties' => array('created' => array('type' => 'boolean'), 'rule' => $rule_out_brief)), 'devdredi_ability_create', 'add');
+        array('type' => 'object', 'properties' => array('created' => array('type' => 'boolean'), 'rule' => $rule_out_brief)), 'devdredi_ability_create', 'destroy'); // 19 Oct: can redirect the whole site at once
 
     $reg('devdome-redirect-manager/update-redirect', __('Update a redirect rule', 'devdome-redirect-manager'),
         __('Change any settings of an existing redirect rule by its id: name, what to redirect and sources, method, destinations and rotation, open mode and delays, frequency, schedule, geo, devices, fallback, custom domains, cache purge. Only the keys you pass change; everything else keeps its value. The update is all or nothing: if any key is refused, the rule is left exactly as it was. Does not start or stop the rule (use set-redirect-state). Page caches are purged when the rule has purge on save enabled.', 'devdome-redirect-manager'),
         array('type' => 'object', 'properties' => array_merge($rule_id_prop, $spec), 'required' => array('rule_id'), 'additionalProperties' => false),
-        array('type' => 'object', 'properties' => array('updated' => array('type' => 'boolean'), 'rule' => $rule_out_brief)), 'devdredi_ability_update', 'modify');
+        array('type' => 'object', 'properties' => array('updated' => array('type' => 'boolean'), 'rule' => $rule_out_brief)), 'devdredi_ability_update', 'destroy'); // 19 Oct
 
     $reg('devdome-redirect-manager/set-redirect-state', __('Start or stop a redirect rule', 'devdome-redirect-manager'),
         __('Start (state running) or stop (state stopped) one redirect rule by its id. Starting makes the rule redirect visitors and purges page caches; stopping leaves the rule and its statistics in place and keeps any remaining run duration. Same as the Run and Stop buttons in wp-admin.', 'devdome-redirect-manager'),
         array('type' => 'object', 'properties' => array_merge($rule_id_prop, array('state' => array('type' => 'string', 'enum' => array('running', 'stopped')))), 'required' => array('rule_id', 'state'), 'additionalProperties' => false),
-        array('type' => 'object', 'properties' => array('rule_id' => array('type' => 'string'), 'state' => array('type' => 'string'))), 'devdredi_ability_set_state', 'modify');
+        array('type' => 'object', 'properties' => array('rule_id' => array('type' => 'string'), 'state' => array('type' => 'string'))), 'devdredi_ability_set_state', 'destroy'); // 19 Oct
 
     $reg('devdome-redirect-manager/duplicate-redirect', __('Duplicate a redirect rule', 'devdome-redirect-manager'),
         __('Copy an existing redirect rule (all settings, no statistics) into a new rule at the end of the priority list, stopped, named "<name> copy" unless a name is given. Same as the Duplicate button in wp-admin.', 'devdome-redirect-manager'),
